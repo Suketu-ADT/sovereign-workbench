@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sovereign Workbench — On-Premise Agentic AI Console</title>
+  <meta name="description" content="Operator console for the Sovereign On-Premise Agentic AI Workbench. Confidential industrial query processing with visible defense pipeline and hash-chain audit logging.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ══════════ SIDEBAR ══════════ -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-top">
+      <button type="button" id="btn-new-chat" class="sidebar-new-chat">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <rect x="3" y="3" width="14" height="14" rx="2"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/>
+        </svg>
+        <span>New Chat</span>
+      </button>
+      <button type="button" id="btn-close-sidebar" class="sidebar-close" aria-label="Close sidebar">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <line x1="5" y1="5" x2="15" y2="15"/><line x1="15" y1="5" x2="5" y2="15"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav class="sidebar-chats" id="chat-list" aria-label="Chat history">
+      <!-- Rendered by script.js -->
+    </nav>
+
+    <div class="sidebar-bottom">
+      <div class="sidebar-user-container" id="user-menu-container">
+        <!-- Profile Dropdown Menu (matching reference image) -->
+        <div class="user-dropdown-menu" id="user-dropdown-menu" hidden role="menu" aria-label="User profile options">
+          <div class="user-dropdown-header">
+            <span class="user-dropdown-email" id="menu-user-email">suketu.2005@gmail.com</span>
+            <span class="user-dropdown-badge" id="menu-user-clearance">Clearance: Level 1 (boiler-102)</span>
+          </div>
+          <div class="dropdown-divider"></div>
+          <button type="button" class="dropdown-item" id="btn-menu-settings" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="3"/><path d="M14.5 9a5.5 5.5 0 0 0-.1-1l1.5-1.2-1.4-2.4-1.8.7a5.5 5.5 0 0 0-1.7-1l-.3-1.9H9.4l-.3 1.9a5.5 5.5 0 0 0-1.7 1l-1.8-.7L4.2 6.8l1.5 1.2a5.5 5.5 0 0 0 0 2l-1.5 1.2 1.4 2.4 1.8-.7a5.5 5.5 0 0 0 1.7 1l.3 1.9h2.8l.3-1.9a5.5 5.5 0 0 0 1.7-1l1.8.7 1.4-2.4-1.5-1.2c.1-.3.1-.7.1-1Z"/></svg>
+            <span class="dropdown-text">Settings</span>
+            <span class="dropdown-shortcut">Ctrl ,</span>
+          </button>
+          <button type="button" class="dropdown-item" id="btn-menu-language" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7"/><line x1="2" y1="9" x2="16" y2="9"/><path d="M9 2a11 11 0 0 1 3.5 7 11 11 0 0 1-3.5 7 11 11 0 0 1-3.5-7A11 11 0 0 1 9 2Z"/></svg>
+            <span class="dropdown-text">Language</span>
+            <span class="dropdown-meta" id="menu-current-lang">English</span>
+          </button>
+          <button type="button" class="dropdown-item" id="btn-menu-help" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="M7 6.5a2 2 0 0 1 3.8.8c0 1.3-1.8 1.7-1.8 3"/><circle cx="9" cy="13" r="0.6" fill="currentColor"/></svg>
+            <span class="dropdown-text">Get help &amp; SOP</span>
+          </button>
+          <div class="dropdown-divider"></div>
+          <button type="button" class="dropdown-item" id="btn-menu-clearances" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 2L3 5v4.5c0 4 2.8 7.5 6 8.5 3.2-1 6-4.5 6-8.5V5L9 2Z"/><polyline points="6.5 9 8 10.5 11.5 7"/></svg>
+            <span class="dropdown-text">View system clearances</span>
+          </button>
+          <button type="button" class="dropdown-item" id="btn-menu-tools" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 13v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2"/><polyline points="6 8 9 11 12 8"/><line x1="9" y1="2" x2="9" y2="11"/></svg>
+            <span class="dropdown-text">Get apps &amp; CLI tools</span>
+          </button>
+          <button type="button" class="dropdown-item" id="btn-menu-academy" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M1.5 6L9 2l7.5 4L9 10 1.5 6Z"/><path d="M4.5 7.6v4.4C4.5 14 6.5 15.5 9 15.5s4.5-1.5 4.5-3.5V7.6"/><line x1="16.5" y1="6.5" x2="16.5" y2="12.5"/></svg>
+            <span class="dropdown-text">Sovereign Academy</span>
+            <span class="dropdown-badge-pill">New</span>
+          </button>
+          <button type="button" class="dropdown-item" id="btn-menu-about" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7"/><line x1="9" y1="8" x2="9" y2="13"/><circle cx="9" cy="5.5" r="0.6" fill="currentColor"/></svg>
+            <span class="dropdown-text">About Sovereign Workbench</span>
+            <span class="dropdown-arrow">&rsaquo;</span>
+          </button>
+          <div class="dropdown-divider"></div>
+          <button type="button" class="dropdown-item dropdown-item--danger" id="btn-menu-logout" role="menuitem">
+            <svg class="dropdown-icon" viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6.5 15H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3.5"/><polyline points="12 12.5 15.5 9 12 5.5"/><line x1="6.5" y1="9" x2="15.5" y2="9"/></svg>
+            <span class="dropdown-text">Log out</span>
+          </button>
+        </div>
+
+        <!-- User Profile Pill (matching Suketu · Pro in reference image) -->
+        <button type="button" class="sidebar-user-btn" id="btn-user-profile" aria-haspopup="true" aria-expanded="false" title="Account &amp; Settings">
+          <div class="user-pill-avatar" id="user-pill-avatar">SM</div>
+          <div class="user-pill-info">
+            <span class="user-pill-name" id="user-pill-name">Suketu</span>
+            <span class="user-pill-sep">&middot;</span>
+            <span class="user-pill-tier" id="user-pill-tier">Pro</span>
+          </div>
+          <svg class="user-pill-chevron" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <polyline points="4 6 8 10 12 6"/>
+          </svg>
+        </button>
+
+        <!-- Logged Out Sign In Button (hidden when logged in) -->
+        <button type="button" class="sidebar-login-btn" id="btn-sidebar-login" hidden>
+          <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 3H15a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3.5"/><polyline points="6 12.5 2.5 9 6 5.5"/><line x1="11.5" y1="9" x2="2.5" y2="9"/></svg>
+          <span>Sign In / Register</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Sidebar overlay (mobile) -->
+  <div id="sidebar-overlay" class="sidebar-overlay" hidden></div>
+
+  <!-- ══════════ MAIN WRAPPER ══════════ -->
+  <div id="main-wrapper" class="main-wrapper">
+
+    <!-- Header -->
+    <header id="main-header">
+      <div class="header-left">
+        <button type="button" id="btn-open-sidebar" class="header-icon-btn" aria-label="Open sidebar">
+          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <line x1="3" y1="5" x2="17" y2="5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="15" x2="17" y2="15"/>
+          </svg>
+        </button>
+        <div class="header-brand">
+          <svg class="header-logo" viewBox="0 0 22 22" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+            <rect x="2" y="2" width="18" height="18" rx="1"/><line x1="11" y1="2" x2="11" y2="20"/><line x1="2" y1="11" x2="20" y2="11"/><circle cx="11" cy="11" r="4"/>
+          </svg>
+          <span class="header-title">Sovereign Workbench</span>
+        </div>
+      </div>
+
+      <nav class="header-nav" aria-label="View navigation">
+        <button type="button" class="view-tab active" id="tab-chat" data-view="chat">
+          <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M3 3h12v9H6l-3 3V3Z"/>
+          </svg>
+          <span>Chat</span>
+        </button>
+        <button type="button" class="view-tab" id="tab-pipeline" data-view="pipeline">
+          <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="9" cy="3" r="2"/><circle cx="9" cy="9" r="2"/><circle cx="9" cy="15" r="2"/><line x1="9" y1="5" x2="9" y2="7"/><line x1="9" y1="11" x2="9" y2="13"/>
+          </svg>
+          <span>Pipeline Trace</span>
+        </button>
+        <button type="button" class="view-tab" id="tab-audit" data-view="audit">
+          <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="3" y="2" width="12" height="14" rx="1"/><line x1="6" y1="5" x2="12" y2="5"/><line x1="6" y1="8" x2="12" y2="8"/><line x1="6" y1="11" x2="9" y2="11"/>
+          </svg>
+          <span>Audit Log</span>
+        </button>
+      </nav>
+
+      <div class="header-right">
+        <div class="header-status">
+          <span class="status-led" aria-hidden="true"></span>
+          <span class="status-label">ONLINE</span>
+        </div>
+        <button type="button" id="theme-toggle" class="header-icon-btn" aria-label="Toggle color theme" title="Toggle theme">
+          <svg class="icon-sun" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="10" cy="10" r="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="19"/><line x1="1" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="19" y2="10"/><line x1="3.5" y1="3.5" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="16.5" y2="16.5"/><line x1="3.5" y1="16.5" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="16.5" y2="3.5"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M17 11.5A7.5 7.5 0 0 1 8.5 3 7.5 7.5 0 1 0 17 11.5Z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ═══ CHAT VIEW ═══ -->
+    <div id="chat-view" class="view view--active">
+      <div id="chat-scroll" class="chat-scroll">
+        <div id="chat-messages" class="chat-messages">
+          <!-- Rendered by script.js -->
+        </div>
+      </div>
+
+      <button type="button" id="btn-scroll-bottom" class="btn-scroll-bottom" aria-label="Scroll to bottom" hidden>
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <polyline points="5 8 10 13 15 8"/>
+        </svg>
+      </button>
+
+      <div class="chat-input-wrapper">
+        <div class="chat-input-box">
+          <div id="image-preview" class="image-preview" hidden>
+            <div class="image-preview-thumb" id="preview-thumb"></div>
+            <span class="image-preview-name" id="preview-name"></span>
+            <button type="button" id="btn-remove-img" class="image-preview-remove" aria-label="Remove image">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="chat-input-row">
+            <label class="input-attach-btn" id="label-attach" tabindex="0" title="Attach image">
+              <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path d="M17 10l-7 7a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54l-7 7a1 1 0 01-1.42-1.42l7-7"/>
+              </svg>
+              <input type="file" id="image-attach" accept="image/*" hidden>
+            </label>
+            <textarea id="chat-input" rows="1" placeholder="Send a message..." aria-label="Message input"></textarea>
+            <button type="button" id="btn-send" class="input-send-btn" disabled aria-label="Send message">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <line x1="10" y1="16" x2="10" y2="4"/><polyline points="5,9 10,4 15,9"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="chat-input-footer">
+          <button type="button" id="btn-demo" class="demo-btn">Load demo scenario</button>
+          <span class="footer-sep" aria-hidden="true">&middot;</span>
+          <span class="footer-hint">Ctrl+Enter to send</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PIPELINE VIEW ═══ -->
+    <div id="pipeline-view" class="view">
+      <div class="pipeline-page">
+        <div class="pipeline-container panel-frame grid-bg">
+          <div class="panel-header">
+            <span class="panel-label">DEFENSE PIPELINE TRACE</span>
+            <span class="pipeline-status" id="pipeline-status">IDLE</span>
+          </div>
+          <div class="panel-body">
+            <div id="pipeline-steps" class="pipeline-steps">
+              <div class="pipeline-empty" id="pipeline-empty">
+                <svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3" aria-hidden="true">
+                  <rect x="4" y="4" width="40" height="40" rx="2" stroke-dasharray="4 3"/><line x1="24" y1="12" x2="24" y2="36"/><line x1="12" y1="24" x2="36" y2="24"/>
+                </svg>
+                <p>Submit a query in Chat to trace the defense pipeline.</p>
+                <p class="pipeline-empty-sub">Each security layer fires in sequence with real-time status.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ AUDIT VIEW ═══ -->
+    <div id="audit-view" class="view">
+      <div class="audit-page">
+        <div class="audit-container panel-frame">
+          <div class="panel-header">
+            <span class="panel-label">HASH-CHAIN AUDIT LOG</span>
+            <span class="audit-count" id="audit-count">0 entries</span>
+          </div>
+          <div id="audit-entries" class="audit-entries">
+            <!-- Rendered by script.js -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ APPROVAL DIALOG ══════════ -->
+  <dialog id="approval-dialog" aria-labelledby="approval-title">
+    <div class="dialog-inner panel-frame">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M12 2L2 7v6c0 5.55 4.84 10.74 10 12 5.16-1.26 10-6.45 10-12V7L12 2Z"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+          </svg>
+        </div>
+        <h2 id="approval-title">Human Authorization Required</h2>
+      </div>
+      <p class="dialog-subtitle">Sensitive action detected — manual approval required per SOP.</p>
+      <dl class="dialog-details">
+        <div class="detail-row"><dt>Action</dt><dd id="approval-action" class="mono"></dd></div>
+        <div class="detail-row"><dt>Target</dt><dd id="approval-target" class="mono"></dd></div>
+        <div class="detail-row"><dt>Requested by</dt><dd id="approval-requestor"></dd></div>
+      </dl>
+      <div class="dialog-context" id="approval-context"></div>
+      <div class="dialog-authority">
+        <span class="authority-label">Approving authority</span>
+        <span class="authority-value" id="approval-authority"></span>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="btn-approve" class="btn btn-approve">APPROVE</button>
+        <button type="button" id="btn-reject" class="btn btn-reject">REJECT</button>
+      </div>
+      <p class="dialog-disclaimer">This action will be logged with hash-chain verification. Decision is non-reversible.</p>
+    </div>
+  </dialog>
+
+  <!-- ══════════ AUTH DIALOG (LOGIN / SIGN UP) ══════════ -->
+  <dialog id="auth-dialog" aria-labelledby="auth-title">
+    <div class="dialog-inner panel-frame auth-dialog-inner">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap dialog-icon-wrap--accent">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <div class="auth-header-text">
+          <h2 id="auth-title">Operator Access &amp; Authentication</h2>
+          <p class="auth-subtitle">Confidential Industrial Console &middot; Air-Gapped RBAC</p>
+        </div>
+        <button type="button" class="dialog-close-btn" id="btn-close-auth" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <!-- Auth Tabs -->
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab active" id="auth-tab-signin" role="tab" aria-selected="true">Sign In</button>
+        <button type="button" class="auth-tab" id="auth-tab-signup" role="tab" aria-selected="false">Create Account</button>
+      </div>
+
+      <!-- Sign In Form -->
+      <form id="form-signin" class="auth-form" onsubmit="return false;">
+        <div class="form-group">
+          <label for="signin-email">Operator Email / ID</label>
+          <input type="text" id="signin-email" class="form-input" placeholder="e.g. suketu.2005@gmail.com" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="signin-password">Security Password / Key</label>
+          <input type="password" id="signin-password" class="form-input" placeholder="••••••••••••" autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-approve btn-auth-submit" id="btn-signin-submit">SIGN IN TO CONSOLE</button>
+
+        <!-- Quick Switch Demo Accounts -->
+        <div class="auth-demo-divider">
+          <span>OR SIGN IN AS TEST OPERATOR</span>
+        </div>
+        <div class="auth-quick-profiles">
+          <button type="button" class="quick-profile-btn" data-demo-user="suketu">
+            <div class="qp-avatar">SM</div>
+            <div class="qp-info">
+              <span class="qp-name">Suketu Patel (Pro)</span>
+              <span class="qp-desc">Lead Auditor &middot; Level 3 Full Facility</span>
+            </div>
+            <span class="qp-badge">L3</span>
+          </button>
+          <button type="button" class="quick-profile-btn" data-demo-user="morrison">
+            <div class="qp-avatar">JM</div>
+            <div class="qp-info">
+              <span class="qp-name">J. Morrison (Engineer)</span>
+              <span class="qp-desc">Maintenance Engineer &middot; boiler-102</span>
+            </div>
+            <span class="qp-badge">L1</span>
+          </button>
+          <button type="button" class="quick-profile-btn" data-demo-user="vance">
+            <div class="qp-avatar">EV</div>
+            <div class="qp-info">
+              <span class="qp-name">Dr. Elena Vance (Specialist)</span>
+              <span class="qp-desc">Turbines, Compressors &amp; Reactants</span>
+            </div>
+            <span class="qp-badge">L2</span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Create Account Form -->
+      <form id="form-signup" class="auth-form" hidden onsubmit="return false;">
+        <div class="form-group">
+          <label for="signup-name">Full Name</label>
+          <input type="text" id="signup-name" class="form-input" placeholder="e.g. Suketu Patel" autocomplete="name">
+        </div>
+        <div class="form-group">
+          <label for="signup-email">Plant Email</label>
+          <input type="email" id="signup-email" class="form-input" placeholder="e.g. suketu@plant.internal" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="signup-password">Access Password</label>
+          <input type="password" id="signup-password" class="form-input" placeholder="At least 8 characters" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label for="signup-clearance">Assigned Clearance Tier (RBAC)</label>
+          <select id="signup-clearance" class="form-select">
+            <option value="level-1">Level 1 — Maintenance Engineer (boiler-102 only)</option>
+            <option value="level-2">Level 2 — Systems Specialist (Turbines, Boilers, Pumps)</option>
+            <option value="level-3">Level 3 — Chief Safety Auditor (All Systems &amp; Audit Logs)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-approve btn-auth-submit" id="btn-signup-submit">REGISTER OPERATOR CREDENTIALS</button>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- ══════════ SETTINGS DIALOG ══════════ -->
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-inner panel-frame settings-dialog-inner">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+          </svg>
+        </div>
+        <h2>Console Settings</h2>
+        <button type="button" class="dialog-close-btn" id="btn-close-settings" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <div class="settings-body">
+        <div class="settings-section">
+          <h3>General &amp; Display</h3>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Interface Theme</span>
+              <span class="setting-desc">Switch between clean light and sleek dark mode</span>
+            </div>
+            <div class="setting-control">
+              <select id="setting-theme-select" class="form-select">
+                <option value="system">Follow System</option>
+                <option value="light">Light Theme</option>
+                <option value="dark">Dark Theme</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Operator Language</span>
+              <span class="setting-desc">Language for console interface &amp; telemetry readings</span>
+            </div>
+            <div class="setting-control">
+              <select id="setting-lang-select" class="form-select">
+                <option value="en">English (US/UK)</option>
+                <option value="de">Deutsch (Industrial)</option>
+                <option value="es">Espa&ntilde;ol (T&eacute;cnico)</option>
+                <option value="hi">Hindi (&agrave;&curren;&sup1;&agrave;&curren;&iquest;&agrave;&curren;&uml;&agrave;&yen;&#141;&agrave;&curren;&brvbar;&agrave;&yen;&#128;)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>On-Premise Model Weights</h3>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Inference Engine</span>
+              <span class="setting-desc">Local weights deployed inside air-gapped GPU server</span>
+            </div>
+            <div class="setting-control">
+              <select id="setting-model-select" class="form-select">
+                <option value="llama3-70b">Llama-3.3-70B-Instruct-Q4 (Air-Gapped vLLM)</option>
+                <option value="mistral-large">Mistral-Large-2407 (On-Premises High Security)</option>
+                <option value="qwen-coder">Qwen-2.5-Coder-32B (Industrial Logic Engine)</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Sampling Temperature</span>
+              <span class="setting-desc">Strict deterministic output for industrial procedures (0.0&ndash;0.2)</span>
+            </div>
+            <div class="setting-control">
+              <span class="mono" style="color:var(--accent);font-size:12px">0.15 (Deterministic)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Defense Pipeline Security</h3>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Prompt Safety Scanning</span>
+              <span class="setting-desc">Adversarial jailbreak heuristics and token injection filters</span>
+            </div>
+            <div class="setting-control">
+              <span class="step-badge" data-badge="passed">SCADA-GRADE ACTIVE</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Audit Log Verification</span>
+              <span class="setting-desc">Verify SHA-256 hash-chain consistency in real time</span>
+            </div>
+            <div class="setting-control">
+              <span class="step-badge" data-badge="passed">CONTINUOUS ON</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-approve" id="btn-save-settings">SAVE PREFERENCES</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ══════════ SOVEREIGN ACADEMY DIALOG ══════════ -->
+  <dialog id="academy-dialog" aria-labelledby="academy-title">
+    <div class="dialog-inner panel-frame academy-dialog-inner">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap dialog-icon-wrap--accent">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M2 7l10-5 10 5-10 5-10-5Z"/><path d="M6 10v6c0 2.5 2.7 4.5 6 4.5s6-2 6-4.5v-6"/><line x1="22" y1="8" x2="22" y2="16"/>
+          </svg>
+        </div>
+        <div class="auth-header-text">
+          <div style="display:flex;align-items:center;gap:8px">
+            <h2 id="academy-title">Sovereign Academy</h2>
+            <span class="dropdown-badge-pill">New</span>
+          </div>
+          <p class="auth-subtitle">Operator curriculum for confidential air-gapped industrial AI</p>
+        </div>
+        <button type="button" class="dialog-close-btn" id="btn-close-academy" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <div class="academy-grid">
+        <div class="academy-card">
+          <div class="academy-card-num">MODULE 01</div>
+          <h4>Air-Gapped Multi-Modal Inference</h4>
+          <p>Running open-weight vision &amp; language models on premises with zero telemetry or outbound egress.</p>
+          <span class="academy-tag">Architecture</span>
+        </div>
+        <div class="academy-card">
+          <div class="academy-card-num">MODULE 02</div>
+          <h4>Prompt-Injection Defense Layers</h4>
+          <p>Heuristic filtering, jailbreak detection, and intent boundary isolation before queries hit execution.</p>
+          <span class="academy-tag">Defense</span>
+        </div>
+        <div class="academy-card">
+          <div class="academy-card-num">MODULE 03</div>
+          <h4>SCADA Role-Based Access Control</h4>
+          <p>Enforcing hardware clearances (boiler-102, pump-201, loop C3) and isolating privileged commands.</p>
+          <span class="academy-tag">Governance</span>
+        </div>
+        <div class="academy-card">
+          <div class="academy-card-num">MODULE 04</div>
+          <h4>Cryptographic Audit Hash Chains</h4>
+          <p>Merkle-linked tamper-proof ledgers ensuring verifiable legal non-repudiation for physical actuator actions.</p>
+          <span class="academy-tag">Compliance</span>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ══════════ CLEARANCES & ROLES DIALOG ══════════ -->
+  <dialog id="clearances-dialog" aria-labelledby="clearances-title">
+    <div class="dialog-inner panel-frame clearances-dialog-inner">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M12 2L3 7v6c0 5.55 4.84 10.74 10 12 5.16-1.26 10-6.45 10-12V7L12 2Z"/><path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <h2>Operator Clearance &amp; RBAC Matrix</h2>
+        <button type="button" class="dialog-close-btn" id="btn-close-clearances" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="clearances-body">
+        <div class="clearance-user-summary">
+          <div class="clearance-user-avatar" id="clr-avatar">SM</div>
+          <div class="clearance-user-details">
+            <div class="clr-name" id="clr-name">Suketu Patel</div>
+            <div class="clr-email mono" id="clr-email">suketu.2005@gmail.com</div>
+            <div class="clr-role" id="clr-role">Clearance: Level 3 (Chief Safety Auditor &middot; All Systems)</div>
+          </div>
+        </div>
+        <div class="clearance-table-wrap">
+          <table class="clearance-table">
+            <thead>
+              <tr>
+                <th>System / Unit</th>
+                <th>Required Tier</th>
+                <th>Your Status</th>
+                <th>Permitted Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">boiler-102</td>
+                <td>Level 1</td>
+                <td><span class="resp-value--passed">AUTHORIZED &check;</span></td>
+                <td>Telemetry, Manuals, Calculation, HITL Valve</td>
+              </tr>
+              <tr>
+                <td class="mono">pump-201</td>
+                <td>Level 1</td>
+                <td><span class="resp-value--passed">AUTHORIZED &check;</span></td>
+                <td>Vibration Spectrum, Motor Diagnostics</td>
+              </tr>
+              <tr>
+                <td class="mono">cooling-loop-c3</td>
+                <td>Level 1</td>
+                <td><span class="resp-value--passed">AUTHORIZED &check;</span></td>
+                <td>Flow Rate, Thermal Delta Compute</td>
+              </tr>
+              <tr>
+                <td class="mono">turbine-gen-4</td>
+                <td>Level 2</td>
+                <td id="clr-turbine-status"><span class="resp-value--passed">AUTHORIZED &check;</span></td>
+                <td>Turbine Governor, Rotor Bearing Telemetry</td>
+              </tr>
+              <tr>
+                <td class="mono">reactor-core-aux</td>
+                <td>Level 3</td>
+                <td id="clr-reactor-status"><span class="resp-value--passed">AUTHORIZED &check;</span></td>
+                <td>Reactor Coolant Bypass, Emergency Scram Audit</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ══════════ GET HELP & SOP DIALOG ══════════ -->
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="dialog-inner panel-frame help-dialog-inner">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/>
+          </svg>
+        </div>
+        <h2>Operator SOP &amp; Emergency Guide</h2>
+        <button type="button" class="dialog-close-btn" id="btn-close-help" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="help-content">
+        <h4>SOP 4.2.1: Pressure Relief Valve Operating Guidelines</h4>
+        <p>Before initiating release valve actuations, operators must verify that the inlet manifold pressure differential does not exceed 5.0 bar under standard load. Normal operating envelope is <strong>4.0&ndash;7.0 bar</strong>.</p>
+        <div class="sop-note">
+          <strong>CRITICAL SAFETY RULE:</strong> All physical valve actuations require explicit secondary Human-in-the-Loop (HITL) authorization by a Senior Engineer.
+        </div>
+        <h4>Console Keyboard Shortcuts</h4>
+        <ul class="sop-keys">
+          <li><kbd>Ctrl</kbd> + <kbd>Enter</kbd> &mdash; Submit message through defense pipeline</li>
+          <li><kbd>Ctrl</kbd> + <kbd>,</kbd> &mdash; Open console settings</li>
+          <li><kbd>Escape</kbd> &mdash; Close active dialog</li>
+        </ul>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ══════════ CLI & APPS DIALOG ══════════ -->
+  <dialog id="tools-dialog" aria-labelledby="tools-title">
+    <div class="dialog-inner panel-frame tools-dialog-inner">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+        </div>
+        <h2>On-Premise CLI &amp; Integrations</h2>
+        <button type="button" class="dialog-close-btn" id="btn-close-tools" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="tools-content">
+        <p>Integrate Sovereign Workbench directly into automated maintenance pipelines, SCADA monitors, and offline verification terminals:</p>
+        <div class="code-block">
+          <code># Run air-gapped query from industrial maintenance terminal
+sovereign query --unit boiler-102 --photo /scada/gauge_01.jpg "Calculate delta P"
+
+# Verify cryptographic hash-chain integrity offline
+sovereign audit verify --chain /var/log/sovereign/audit.chain</code>
+        <div class="tools-export-row">
+          <button type="button" class="btn btn-approve" id="btn-export-audit-json">EXPORT AUDIT TRAIL (JSON)</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ══════════ ABOUT SOVEREIGN WORKBENCH DIALOG ══════════ -->
+  <dialog id="about-dialog" aria-labelledby="about-title">
+    <div class="dialog-inner panel-frame about-dialog-inner">
+      <div class="dialog-header">
+        <div class="dialog-icon-wrap dialog-icon-wrap--accent">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+        </div>
+        <div>
+          <h2 id="about-title">Sovereign Workbench</h2>
+          <p class="dialog-subtitle" style="margin-bottom:0">On-Premise Industrial AI Operator Console</p>
+        </div>
+        <button type="button" class="dialog-close-btn" id="btn-close-about" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="about-content">
+        <div class="about-badge-row">
+          <span class="step-badge" data-badge="passed">AIR-GAPPED v2.4.1</span>
+          <span class="step-badge" data-badge="passed">IEC 62443 COMPLIANT</span>
+          <span class="step-badge" data-badge="passed">ZERO EGRESS</span>
+        </div>
+        <div class="about-meta-list">
+          <div class="about-meta-item">
+            <span class="about-meta-k">Build Hash</span>
+            <span class="about-meta-v mono">sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</span>
+          </div>
+          <div class="about-meta-item">
+            <span class="about-meta-k">Local Node</span>
+            <span class="about-meta-v mono">gpu-node-04.airgap.internal (2x NVIDIA RTX 6000 Ada)</span>
+          </div>
+          <div class="about-meta-item">
+            <span class="about-meta-k">Active Model</span>
+            <span class="about-meta-v mono">Llama-3.3-70B-Instruct-Q4 (vLLM Engine)</span>
+          </div>
+          <div class="about-meta-item">
+            <span class="about-meta-k">Audit Engine</span>
+            <span class="about-meta-v mono">Cryptographic SHA-256 Merkle Ledger (Continuous)</span>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text-2);margin-top:14px;line-height:1.5">
+          Sovereign Workbench provides confidential industrial intelligence for high-consequence operational technology (OT). All inferences, document lookups, and actuator requests are isolated on-premises without external API dependencies.
+        </p>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="script.js"></script>
+</body>
+</html>
