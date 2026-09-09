@@ -139,10 +139,11 @@ async def submit_query(
 
         await audit_service.append_entry(
             db=db,
-            event_type="RETRIEVAL_CHUNKS_ACCESSED",
+            event_type="RETRIEVAL_EXECUTED",
             detail=audit_detail,
             actor_user_id=user_id,
         )
+
 
         # Query complete (vision/calculation are Phases 4-5)
         await audit_service.append_entry(

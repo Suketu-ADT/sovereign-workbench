@@ -161,14 +161,15 @@ def run_tests():
     r = client.post("/query", json={"text": "General maintenance procedures overview", "has_image": False}, headers=headers_john)
     record(r.status_code == 200, f"RBAC Unrestricted query (no unit): 200 ALLOWED")
 
-    # 18. Audit Log - List Entries (Verify RETRIEVAL_CHUNKS_ACCESSED is present)
+    # 18. Audit Log - List Entries (Verify RETRIEVAL_EXECUTED is present)
     r = client.get("/audit?limit=20", headers=headers_suketu)
     entries = r.json().get("entries", [])
-    retrieval_logs = [e for e in entries if e.get("event") == "RETRIEVAL_CHUNKS_ACCESSED"]
+    retrieval_logs = [e for e in entries if e.get("event") in ("RETRIEVAL_EXECUTED", "RETRIEVAL_CHUNKS_ACCESSED")]
     record(
         r.status_code == 200 and len(retrieval_logs) > 0,
-        f"GET /audit (RETRIEVAL_CHUNKS_ACCESSED): 200 OK (found {len(retrieval_logs)} retrieval audit events, newest: {retrieval_logs[0].get('detail')[:45]}...)"
+        f"GET /audit (RETRIEVAL_EXECUTED): 200 OK (found {len(retrieval_logs)} retrieval audit events, newest: {retrieval_logs[0].get('detail')[:45]}...)"
     )
+
 
     # 19. Audit Log - Verify Hash Chain Cryptographic Integrity
     r = client.get("/audit/verify", headers=headers_suketu)

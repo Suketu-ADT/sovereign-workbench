@@ -128,15 +128,16 @@ async def test_query_pipeline_retrieval_integration():
             assert chunk["unit"] == "boiler-102"
         assert data["retrieved_chunks"][0]["sop_id"] == "SOP-102-1"
 
-        # Verify audit log contains RETRIEVAL_CHUNKS_ACCESSED
+        # Verify audit log contains RETRIEVAL_EXECUTED
         audit_res = await client.get("/audit?limit=20", headers=headers_l1)
         assert audit_res.status_code == 200
         entries = audit_res.json()["entries"]
-        retrieval_entries = [e for e in entries if e["event"] == "RETRIEVAL_CHUNKS_ACCESSED"]
+        retrieval_entries = [e for e in entries if e["event"] == "RETRIEVAL_EXECUTED"]
         assert len(retrieval_entries) > 0
         latest_retrieval = retrieval_entries[0]
         assert "SOP-102-1" in latest_retrieval["detail"]
         assert "clearance 1" in latest_retrieval["detail"]
+
 
 
         # Verify cryptographic hash chain integrity
