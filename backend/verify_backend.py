@@ -316,6 +316,40 @@ def run_tests():
             f"POST /query/stream (HITL Interruption SSE): 200 OK (event: approval_required emitted with thread_id)"
         )
 
+    # 29. Phase 7 - Input Boundary Hardening: Oversized text (>4096 chars) rejected with 422
+    r = client.post(
+        "/query",
+        json={"text": "boiler-102 " + ("A" * 4100), "has_image": False},
+        headers=headers_john,
+    )
+    record(
+        r.status_code == 422,
+        f"Input Bounds (>4096 chars): {r.status_code} Unprocessable Entity (strictly rejected oversized text)"
+    )
+
+    # 30. Phase 7 - Input Boundary Hardening: Null-byte injection rejected with 422
+    r = client.post(
+        "/query",
+        json={"text": "boiler-102 \x00 drop table audit_log;", "has_image": False},
+        headers=headers_john,
+    )
+    record(
+        r.status_code == 422,
+        f"Input Bounds (Null-byte injection): {r.status_code} Unprocessable Entity (strictly rejected null byte)"
+    )
+
+    # 31. Phase 7 - Vision Robustness: Corrupted image base64 handled gracefully
+    fake_b64 = "Tk9UX0FfUkVBTF9JTUFHRV9IRUFERVJfQ09OVEVOVA=="
+    r = client.post(
+        "/query",
+        json={"text": "Read boiler-102 gauge pressure", "has_image": True, "image_data": fake_b64},
+        headers=headers_john,
+    )
+    record(
+        r.status_code == 200 and r.json().get("status") in ("accepted_stub", "awaiting_approval"),
+        f"Vision Robustness (Corrupted image magic bytes): 200 OK (graceful fallback without 500 error)"
+    )
+
     print("=" * 60)
     total = len(results)
     passed = results.count(True)

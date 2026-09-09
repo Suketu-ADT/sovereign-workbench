@@ -28,11 +28,17 @@ _ALLOWED_OPERATORS = {
 def _safe_eval_node(node: ast.AST, variables: dict[str, float]) -> float:
     """Recursively evaluates an AST node containing only arithmetic operations."""
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return float(node.value)
+        val = float(node.value)
+        if abs(val) > 1e9:
+            raise ValueError("Numeric constant exceeds maximum calculation limit (1e9)")
+        return val
 
     if isinstance(node, ast.Name):
         if node.id in variables:
-            return float(variables[node.id])
+            val = float(variables[node.id])
+            if abs(val) > 1e9:
+                raise ValueError(f"Variable '{node.id}' exceeds maximum calculation limit (1e9)")
+            return val
         raise ValueError(f"Undefined variable in calculation: '{node.id}'")
 
     if isinstance(node, ast.BinOp):
@@ -43,7 +49,13 @@ def _safe_eval_node(node: ast.AST, variables: dict[str, float]) -> float:
         right = _safe_eval_node(node.right, variables)
         if op_type is ast.Div and abs(right) < 1e-12:
             raise ZeroDivisionError("Division by zero in calculation sandbox")
-        return _ALLOWED_OPERATORS[op_type](left, right)
+        if op_type is ast.Pow:
+            if abs(right) > 8 or abs(left) > 10000:
+                raise ValueError("Exponent or base exceeds safe calculation bounds (max base 10000, max exp 8)")
+        res = _ALLOWED_OPERATORS[op_type](left, right)
+        if abs(res) > 1e12:
+            raise ValueError("Calculation result exceeds allowable magnitude")
+        return res
 
     if isinstance(node, ast.UnaryOp):
         op_type = type(node.op)
@@ -63,8 +75,14 @@ class CalculationService:
         Safely evaluates an arithmetic expression using AST inspection.
         Rejects function calls, imports, attribute access, and arbitrary code.
         """
+        if len(formula) > 256:
+            raise ValueError("Formula string exceeds safe length limit (256 chars)")
+
         try:
             parsed = ast.parse(formula, mode="eval")
+            # Guard against complex AST trees
+            if sum(1 for _ in ast.walk(parsed)) > 50:
+                raise ValueError("Formula AST complexity exceeds safe limit (max 50 nodes)")
             return _safe_eval_node(parsed.body, variables)
         except Exception as e:
             logger.error("Sandboxed calculation error for '%s': %s", formula, e)

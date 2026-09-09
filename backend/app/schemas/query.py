@@ -2,13 +2,23 @@
 Query request/response schemas for the defense pipeline.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class QueryRequest(BaseModel):
-    text: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1, max_length=4096)
     has_image: bool = False
-    image_data: str | None = None  # Base64 data URL or raw base64 string
+    image_data: str | None = Field(default=None, max_length=10_000_000)  # Max 10MB raw base64 string
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        if "\x00" in v:
+            raise ValueError("Null bytes not permitted in query text")
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Query text cannot be empty whitespace")
+        return stripped
 
 
 class RetrievedChunk(BaseModel):

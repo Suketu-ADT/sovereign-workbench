@@ -27,6 +27,21 @@ _CIRCUIT_BREAKER_COOLDOWN = 30.0
 _last_vlm_failure_time: float = 0.0
 
 
+# Prevent PIL decompression bombs
+Image.MAX_IMAGE_PIXELS = 16_000_000
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB binary limit
+MAX_IMAGE_DIMENSION = 4096
+
+VALID_MAGIC_HEADERS = (
+    b"\x89PNG\r\n\x1a\n",  # PNG
+    b"\xff\xd8\xff",        # JPEG
+    b"RIFF",                # WEBP/AVI
+    b"BM",                  # BMP
+    b"GIF87a",              # GIF87a
+    b"GIF89a",              # GIF89a
+)
+
+
 class VisionService:
     """Extracts operational analog/digital gauge readings from photos."""
 
@@ -74,7 +89,10 @@ class VisionService:
             return None
 
     def _decode_image_bytes(self, image_data: str | bytes) -> np.ndarray | None:
-        """Decodes base64 string or raw bytes into a BGR OpenCV numpy image."""
+        """
+        Validates magic headers, size bounds, and decodes image into BGR OpenCV numpy array.
+        Guards against corrupted buffers, decompression bombs, and polyglot files.
+        """
         try:
             if isinstance(image_data, str):
                 # Strip data URL header if present (e.g. data:image/png;base64,...)
@@ -84,8 +102,31 @@ class VisionService:
             else:
                 raw_bytes = image_data
 
+            if not raw_bytes:
+                logger.warning("Empty image buffer provided")
+                return None
+
+            if len(raw_bytes) > MAX_IMAGE_BYTES:
+                logger.warning("Image buffer exceeds 5MB limit (%d bytes)", len(raw_bytes))
+                return None
+
+            # Verify image magic bytes
+            is_valid_header = any(raw_bytes.startswith(h) for h in VALID_MAGIC_HEADERS)
+            if not is_valid_header:
+                logger.warning("Image buffer has invalid or unrecognized magic header")
+                return None
+
             nparr = np.frombuffer(raw_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                logger.warning("cv2.imdecode failed to decode image buffer")
+                return None
+
+            h, w = img.shape[:2]
+            if h > MAX_IMAGE_DIMENSION or w > MAX_IMAGE_DIMENSION:
+                logger.warning("Image dimensions %dx%d exceed maximum limit %d", w, h, MAX_IMAGE_DIMENSION)
+                return None
+
             return img
         except Exception as e:
             logger.warning("Failed to decode image buffer: %s", e)
