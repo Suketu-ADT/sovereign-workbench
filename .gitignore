@@ -1,6 +1,28 @@
-﻿.DS_Store
+.DS_Store
 Thumbs.db
 *.tmp
 *.log
 .vscode/
 .idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.pytest_cache/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Backend secrets
+backend/.env
+
+# Docker
+pgdata/
