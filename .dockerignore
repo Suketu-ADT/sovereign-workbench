@@ -1,0 +1,12 @@
+.git/
+.gitignore
+.gemini/
+*.pdf
+backend/__pycache__/
+backend/*/__pycache__/
+backend/*/*/__pycache__/
+backend/.pytest_cache/
+backend/*.db
+backend/sovereign.db
+backend/.env
+backend/.coverage

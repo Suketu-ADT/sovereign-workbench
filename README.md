@@ -177,12 +177,29 @@ Navigate to `http://localhost:8080`.
 > [!NOTE]
 > **Frontend Runtime Architecture**: The frontend console (`index.html` + `script.js`) is fully wired to the FastAPI backend via real Server-Sent Events (SSE) streaming at `http://127.0.0.1:8000/query/stream`, with live JWT auth (`/auth/login`), HITL approval resumption (`/approvals/{id}/decision`), and cryptographic hash-chain synchronization (`/audit`). If run standalone without the server, it seamlessly activates an air-gapped local fallback mode.
 
-### Option 3: Run the FastAPI Backend (Phase 0/1)
+### Option 3: Run the FastAPI Backend
 ```bash
 cd backend
 python -m uvicorn app.main:app --port 8000
 ```
 Interactive Swagger UI documentation is available at **`http://localhost:8000/docs`**.
+
+### Option 4: Full Multi-Container Stack (Docker Compose)
+```bash
+# Launch backend, persistent storage, and Nginx reverse proxy with SSE streaming
+docker compose up -d
+```
+Access the operator interface at **`http://localhost`** (or `http://localhost:8080`).
+
+### Option 5: Air-Gapped Offline Bootstrap
+```powershell
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap_airgap.ps1
+
+# Linux / Unix
+chmod +x scripts/bootstrap_airgap.sh && ./scripts/bootstrap_airgap.sh
+```
+Pre-caches transformer weights, applies migrations, seeds default plant operators, and validates offline hash-chain integrity.
 
 ---
 
@@ -248,7 +265,7 @@ The entire chain can be exported as a verified JSON ledger anytime by opening th
 | **Phase 5** | Planner & Orchestration (LangGraph `StateGraph`, `interrupt()` HITL gate, `/approvals` lifecycle) | ✅ Complete | 4 unit tests passed; sensitive actuator pauses and operator dual-key resumption |
 | **Phase 6** | HITL Streaming & Frontend Rewiring via Server-Sent Events (`POST /query/stream`) & live state sync | ✅ Complete | 4 unit tests passed; 100% simulated client-side logic replaced with real backend calls |
 | **Phase 7** | Comprehensive Security Review & E2E Validation (Input boundaries, magic bytes, AST DoS caps, tamper proof) | ✅ Complete | 5 unit tests passed; 36/36 full pytest suite passed; 31/31 live integration tests passed |
-| **Phase 8** | Production Deployment & Air-Gapped Packaging (Docker Compose multi-container, health checks, offline bootstrap) | 🔄 Next | Containerized runtime orchestration |
+| **Phase 8** | Production Deployment & Air-Gapped Packaging (Docker Compose multi-container, health checks, offline bootstrap) | ✅ Complete | Multi-container stack (FastAPI + Nginx reverse proxy), non-root containers, offline bootstrap verified |
 
 ---
 

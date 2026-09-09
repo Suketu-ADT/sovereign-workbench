@@ -1,0 +1,51 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sovereign-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/sovereign.db
+      - QDRANT_STORAGE_PATH=/app/data/qdrant_storage
+      - FASTEMBED_CACHE_PATH=/app/data/fastembed_cache
+      - JWT_SECRET=sovereign_industrial_airgapped_super_secret_key_change_in_prod_12345
+      - JWT_EXPIRE_MINUTES=480
+      - PROMPT_GUARD_ENABLED=true
+      - LOCAL_VLM_ENABLED=false
+      - PLANNER_MODEL_ENABLED=false
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - sovereign-net
+
+  frontend:
+    image: nginx:alpine
+    container_name: sovereign-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8080:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./styles.css:/usr/share/nginx/html/styles.css:ro
+      - ./script.js:/usr/share/nginx/html/script.js:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - sovereign-net
+
+networks:
+  sovereign-net:
+    driver: bridge
