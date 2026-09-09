@@ -78,10 +78,40 @@ _last_endpoint_failure_time: float = 0.0
 _CIRCUIT_BREAKER_COOLDOWN: float = 30.0
 
 
+def get_llm_status() -> str:
+    """
+    Returns the operational status of the secondary Llama-Guard LLM safety layer.
+    
+    Status values:
+      - 'active': Endpoint configured and operational (circuit breaker healthy).
+      - 'degraded': Circuit-breaker tripped due to network timeout or connection error.
+      - 'disabled': PromptGuard LLM screening disabled or URL not configured.
+    """
+    if not settings.PROMPT_GUARD_ENABLED or not settings.PROMPT_GUARD_URL:
+        return "disabled"
+    if _last_endpoint_failure_time > 0 and (
+        time.time() - _last_endpoint_failure_time < _CIRCUIT_BREAKER_COOLDOWN
+    ):
+        return "degraded"
+    return "active"
+
+
 async def _query_llama_guard(prompt: str) -> Tuple[bool, str | None]:
     """
     Query local Llama-Guard-3 instance (via Ollama /api/generate or vLLM).
     Returns (is_safe, reason).
+
+    ARCHITECTURE DESIGN DECISION (FAIL-OPEN vs FAIL-CLOSED):
+    The Sovereign Workbench implements a two-tier defense-in-depth safety architecture:
+      - Tier 1 (Deterministic OT Heuristics): STRICT FAIL-CLOSED. All prompt injection,
+        jailbreak, delimiter, and unauthorized actuator bypass strings are unconditionally
+        blocked with HTTP 400 Bad Request.
+      - Tier 2 (Llama-Guard-3 Semantic LLM): FAIL-OPEN to Tier 1 with Circuit Breaker.
+        In mission-critical industrial SCADA environments, plant operations and sensor
+        telemetry inspections must not suffer total denial-of-service if an on-premise
+        LLM container stalls or is restarting. When unreachable, the failure is surfaced
+        immediately via WARNING log level and the /health endpoint reports 'degraded',
+        while Tier 1 ensures zero bypass of known adversarial syntax.
     """
     global _last_endpoint_failure_time
     if time.time() - _last_endpoint_failure_time < _CIRCUIT_BREAKER_COOLDOWN:
@@ -111,7 +141,7 @@ async def _query_llama_guard(prompt: str) -> Tuple[bool, str | None]:
                     return True, None
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as e:
         _last_endpoint_failure_time = time.time()
-        logger.debug(
+        logger.warning(
             "Local Llama-Guard-3 endpoint unavailable (%s: %s) — relying on deterministic safety scanner.",
             type(e).__name__,
             e,

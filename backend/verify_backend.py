@@ -32,9 +32,15 @@ def run_tests():
     print("SOVEREIGN WORKBENCH BACKEND (PHASE 0/1) VERIFICATION SUITE")
     print("=" * 60)
 
-    # 1. Health Check
+    # 1. Health Check (Subsystems & AI Defense Status)
     r = client.get("/health")
-    record(r.status_code == 200 and r.json().get("status") in ("healthy", "ok"), f"GET /health: {r.status_code} - {r.json()}")
+    record(
+        r.status_code == 200
+        and r.json().get("status") in ("healthy", "ok")
+        and "database" in r.json()
+        and "prompt_guard_llm_status" in r.json(),
+        f"GET /health: {r.status_code} - {r.json()}",
+    )
 
     # 2. OpenAPI Specs
     r = client.get("/openapi.json")

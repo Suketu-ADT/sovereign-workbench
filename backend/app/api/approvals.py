@@ -2,13 +2,19 @@
 Human-in-the-Loop (HITL) approval endpoints.
 Allows authorized operators to inspect pending sensitive actuator commands
 and resume interrupted LangGraph workflows with cryptographic audit commitment.
+Durable across worker processes and restarts via PostgreSQL persistence.
 """
 
+import uuid
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.db.session import get_db
+from app.models.approval import PendingApproval
 from app.schemas.query import HITLDecisionRequest, HITLDecisionResponse
 from app.services import audit_service, planner_service
 
@@ -21,20 +27,41 @@ router = APIRouter(prefix="/approvals", tags=["Approvals"])
 )
 async def list_pending_approvals(
     current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Lists all active approval gates paused in LangGraph."""
-    pending = planner_service.list_pending_approvals()
+    """Lists all active approval gates paused in LangGraph across all workers."""
+    result = await db.execute(
+        select(PendingApproval)
+        .where(PendingApproval.status == "PENDING")
+        .order_by(PendingApproval.created_at.desc())
+    )
+    rows = result.scalars().all()
+
+    seen_threads = {r.thread_id for r in rows}
     items = [
         {
-            "thread_id": p["thread_id"],
-            "unit": p["unit"],
-            "operator_email": p["operator_email"],
-            "approval_details": p["approval_details"],
+            "thread_id": p.thread_id,
+            "unit": p.unit,
+            "operator_email": p.operator_email,
+            "approval_details": p.approval_details,
         }
-        for p in pending
+        for p in rows
     ]
+
+    # In-memory fallback for local dev / non-persisted test stubs
+    for p in planner_service.list_pending_approvals():
+        if p["thread_id"] not in seen_threads:
+            items.append(
+                {
+                    "thread_id": p["thread_id"],
+                    "unit": p["unit"],
+                    "operator_email": p["operator_email"],
+                    "approval_details": p["approval_details"],
+                }
+            )
+
     return {
-        "count": len(pending),
+        "count": len(items),
         "approvals": items,
         "pending_approvals": items,
     }
@@ -62,9 +89,17 @@ async def submit_approval_decision(
             detail="Decision must be 'approve' or 'reject'",
         )
 
-    # 1. Fetch pending approval
-    pending = planner_service.get_pending_approval(thread_id)
-    if not pending:
+    # 1. Fetch pending approval from persistent DB (with in-memory fallback)
+    result = await db.execute(
+        select(PendingApproval).where(
+            PendingApproval.thread_id == thread_id,
+            PendingApproval.status == "PENDING",
+        )
+    )
+    db_pending = result.scalar_one_or_none()
+    mem_pending = planner_service.get_pending_approval(thread_id)
+
+    if not db_pending and not mem_pending:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pending approval for thread '{thread_id}' not found or already resolved",
@@ -72,7 +107,17 @@ async def submit_approval_decision(
 
     # 2. Strict Anti-Self-Approval Enforcement (Dual-Custody Separation of Duties)
     current_sub = str(current_user.get("sub", ""))
-    requestor_id = str(pending.get("user_id", ""))
+    if db_pending:
+        requestor_id = str(db_pending.requestor_user_id)
+        authority = db_pending.authority
+        action = db_pending.action
+        target = db_pending.target
+    else:
+        requestor_id = str(mem_pending.get("user_id", ""))
+        authority = mem_pending.get("approval_details", {}).get("authority")
+        action = mem_pending.get("approval_details", {}).get("action", "unknown")
+        target = mem_pending.get("approval_details", {}).get("target", "unknown")
+
     if current_sub and requestor_id and current_sub == requestor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -83,7 +128,6 @@ async def submit_approval_decision(
         )
 
     # 3. Clearance Level Enforcement derived from Authority Specification
-    authority = pending.get("approval_details", {}).get("authority")
     required_clearance = planner_service.get_required_clearance_for_authority(authority)
     approver_clearance = current_user.get("clearance_level", 0)
     if approver_clearance < required_clearance:
@@ -101,11 +145,13 @@ async def submit_approval_decision(
     operator_name = current_user.get("name") or operator_email
 
     try:
-        resume_res = planner_service.resume_plan(
+        resume_res = await planner_service.resume_plan(
             thread_id=thread_id,
             approved=approved,
             operator_email=operator_email,
             comment=body.comment,
+            action=action,
+            target=target,
         )
     except KeyError as e:
         raise HTTPException(
@@ -113,10 +159,10 @@ async def submit_approval_decision(
             detail=str(e),
         )
 
-    # Commit decision to cryptographic audit log
+    # Commit decision to cryptographic audit log and resolve pending_approval in SAME transaction
     event_type = "HITL_APPROVAL" if approved else "HITL_REJECTION"
-    action = resume_res["action"]
-    target = resume_res["target"]
+    action = resume_res.get("action") or action
+    target = resume_res.get("target") or target
 
     detail_str = (
         f"{action} {'approved' if approved else 'rejected'} by {operator_role} "
@@ -124,10 +170,12 @@ async def submit_approval_decision(
         + (f" — Comment: {body.comment}" if body.comment else "")
     )
 
-    import uuid
     user_id = uuid.UUID(current_user["sub"]) if "sub" in current_user else None
 
-    async with audit_service.audit_transaction():
+    async with audit_service.audit_transaction(db):
+        if db_pending:
+            db_pending.status = "APPROVED" if approved else "REJECTED"
+            db_pending.resolved_at = datetime.now(timezone.utc)
         entry = await audit_service.append_entry(
             db=db,
             event_type=event_type,

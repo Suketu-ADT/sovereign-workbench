@@ -34,8 +34,8 @@ def setup_test_db():
     and initializes in-memory vector retrieval for the test session.
     """
     async def _init_db():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        from app.db.migrate import run_migrations
+        await run_migrations()
         async with async_session_factory() as db:
             await seed_database(db)
 

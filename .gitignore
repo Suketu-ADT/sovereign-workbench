@@ -16,16 +16,21 @@ build/
 venv/
 .pytest_cache/
 
-# Databases
+# Databases & Vector Stores
 *.db
 *.sqlite
 *.sqlite3
 qdrant_storage/
 backend/qdrant_storage/
+data/
 
-
-# Backend secrets
+# Environment Secrets
+.env
+*.env
+!.env.example
 backend/.env
+!backend/.env.example
 
-# Docker
+# Docker Volumes
 pgdata/
+qdrant_data/

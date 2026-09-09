@@ -184,11 +184,21 @@ def _route_after_reasoning(state: PlanState) -> str:
     return "action_execution"
 
 
+try:
+    from psycopg_pool import AsyncConnectionPool
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    POSTGRES_CHECKPOINTER_AVAILABLE = True
+except ImportError:
+    POSTGRES_CHECKPOINTER_AVAILABLE = False
+
+
 class PlannerService:
     """Manages LangGraph compilation, execution, and HITL resumption."""
 
     def __init__(self):
         self.checkpointer = MemorySaver()
+        self.pool = None
         self.graph = self._build_graph()
         self._pending_approvals: dict[str, dict[str, Any]] = {}
 
@@ -212,7 +222,54 @@ class PlannerService:
 
         return workflow.compile(checkpointer=self.checkpointer)
 
-    def run_plan(
+    async def init_checkpointer(self):
+        """Initializes Postgres-backed checkpointer when running against PostgreSQL."""
+        if "postgresql" in settings.DATABASE_URL.lower():
+            if not POSTGRES_CHECKPOINTER_AVAILABLE:
+                logger.warning(
+                    "langgraph-checkpoint-postgres or psycopg_pool not available; using MemorySaver"
+                )
+                return
+
+            try:
+                # Strip asyncpg driver prefix for psycopg
+                conn_str = settings.DATABASE_URL.replace(
+                    "postgresql+asyncpg://", "postgresql://"
+                )
+                self.pool = AsyncConnectionPool(
+                    conninfo=conn_str, max_size=10, open=False
+                )
+                await self.pool.open()
+                self.checkpointer = AsyncPostgresSaver(self.pool)
+                # Ensure checkpoint tables are created under advisory lock to avoid worker races
+                async with self.pool.connection() as conn:
+                    await conn.execute("SELECT pg_advisory_lock(4242424244);")
+                    try:
+                        await self.checkpointer.setup()
+                    finally:
+                        await conn.execute("SELECT pg_advisory_unlock(4242424244);")
+                self.graph = self._build_graph()
+                logger.info(
+                    "PlannerService successfully initialized with AsyncPostgresSaver checkpointer"
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to initialize AsyncPostgresSaver: %s. Falling back to MemorySaver.",
+                    e,
+                )
+        else:
+            logger.info(
+                "PlannerService using in-memory checkpointer (development/testing)"
+            )
+
+    async def close_checkpointer(self):
+        """Disposes connection pool on application shutdown."""
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
+            logger.info("PlannerService checkpointer pool closed")
+
+    async def run_plan(
         self,
         query: str,
         user_id: str,
@@ -248,7 +305,7 @@ class PlannerService:
         }
 
         config = {"configurable": {"thread_id": tid}}
-        result = self.graph.invoke(initial_state, config=config)
+        result = await self.graph.ainvoke(initial_state, config=config)
 
         # Check if paused on interrupt
         if "__interrupt__" in result:
@@ -279,34 +336,54 @@ class PlannerService:
             "synthesis": result.get("final_synthesis"),
         }
 
-    def resume_plan(
+    async def resume_plan(
         self,
         thread_id: str,
         approved: bool,
         operator_email: str,
         comment: str | None = None,
+        action: str | None = None,
+        target: str | None = None,
     ) -> dict[str, Any]:
         """
         Resumes a paused LangGraph thread with operator decision (approved=True/False).
+        Works seamlessly across multi-worker deployments via Postgres-backed checkpointing.
         """
-        if thread_id not in self._pending_approvals:
-            raise KeyError(f"Pending approval for thread '{thread_id}' not found or already resolved")
-
-        pending_info = self._pending_approvals.pop(thread_id)
         config = {"configurable": {"thread_id": thread_id}}
+        pending_info = self._pending_approvals.pop(thread_id, None)
+
+        if pending_info:
+            action = action or pending_info.get("approval_details", {}).get("action")
+            target = target or pending_info.get("approval_details", {}).get("target")
+
+        # If action/target still not provided, inspect checkpointed state
+        if not action or not target:
+            try:
+                state_snapshot = await self.graph.aget_state(config)
+                if state_snapshot and state_snapshot.values:
+                    appr_details = state_snapshot.values.get("approval_details") or {}
+                    action = action or appr_details.get("action") or "open_release_valve"
+                    target = target or appr_details.get("target") or "actuator"
+            except Exception as e:
+                logger.debug("Could not inspect graph state for thread %s: %s", thread_id, e)
+
+        action = action or "open_release_valve"
+        target = target or "unit actuator"
 
         resume_payload = {
             "approved": approved,
             "operator_email": operator_email,
             "comment": comment,
         }
-        resumed_state = self.graph.invoke(Command(resume=resume_payload), config=config)
+        resumed_state = await self.graph.ainvoke(
+            Command(resume=resume_payload), config=config
+        )
 
         return {
             "thread_id": thread_id,
             "status": "APPROVED_AND_EXECUTED" if approved else "REJECTED",
-            "action": pending_info["approval_details"]["action"],
-            "target": pending_info["approval_details"]["target"],
+            "action": action,
+            "target": target,
             "operator_email": operator_email,
             "synthesis": resumed_state.get("final_synthesis"),
             "action_status": resumed_state.get("action_status"),

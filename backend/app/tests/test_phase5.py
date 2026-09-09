@@ -20,9 +20,10 @@ from app.main import app
 from app.services.planner_service import planner_service
 
 
-def test_planner_nonsensitive_flow():
+@pytest.mark.asyncio
+async def test_planner_nonsensitive_flow():
     """Non-sensitive informational query completes without interruption."""
-    res = planner_service.run_plan(
+    res = await planner_service.run_plan(
         query="Check boiler-102 temperature and pressure log",
         user_id="test-user-1",
         operator_email="j.morrison@plant.internal",
@@ -38,10 +39,11 @@ def test_planner_nonsensitive_flow():
     assert "nominal boundaries" in res["synthesis"]
 
 
-def test_planner_sensitive_interruption_and_resume():
+@pytest.mark.asyncio
+async def test_planner_sensitive_interruption_and_resume():
     """Sensitive actuator action triggers LangGraph interrupt(), resumes with approval."""
     # 1. Trigger interruption
-    res = planner_service.run_plan(
+    res = await planner_service.run_plan(
         query="Fetch boiler-102 log, open release valve if abnormal",
         user_id="test-user-1",
         operator_email="j.morrison@plant.internal",
@@ -63,7 +65,7 @@ def test_planner_sensitive_interruption_and_resume():
     assert any(p["thread_id"] == thread_id for p in pending)
 
     # 2. Resume with approval
-    resume_res = planner_service.resume_plan(
+    resume_res = await planner_service.resume_plan(
         thread_id=thread_id,
         approved=True,
         operator_email="j.morrison@plant.internal",
@@ -78,9 +80,10 @@ def test_planner_sensitive_interruption_and_resume():
     assert not any(p["thread_id"] == thread_id for p in pending_after)
 
 
-def test_planner_sensitive_rejection():
+@pytest.mark.asyncio
+async def test_planner_sensitive_rejection():
     """Sensitive actuator action paused at HITL gate can be rejected safely."""
-    res = planner_service.run_plan(
+    res = await planner_service.run_plan(
         query="Open release valve on boiler-102 immediately",
         user_id="test-user-1",
         operator_email="j.morrison@plant.internal",
@@ -90,7 +93,7 @@ def test_planner_sensitive_rejection():
     assert res["status"] == "awaiting_approval"
     thread_id = res["thread_id"]
 
-    resume_res = planner_service.resume_plan(
+    resume_res = await planner_service.resume_plan(
         thread_id=thread_id,
         approved=False,
         operator_email="elena.vance@plant.internal",

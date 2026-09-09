@@ -15,6 +15,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ── Environment ───────────────────────────────────────────
+    ENVIRONMENT: str = "development"
+
     # ── Database ──────────────────────────────────────────────
     # Default: SQLite for local dev. Docker .env overrides to Postgres.
     DATABASE_URL: str = "sqlite+aiosqlite:///./sovereign.db"

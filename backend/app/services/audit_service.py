@@ -36,7 +36,7 @@ _chain_lock = asyncio.Lock()
 
 
 @asynccontextmanager
-async def audit_transaction(db: AsyncSession | None = None):
+async def audit_transaction(db: AsyncSession):
     """
     Async context manager that serializes hash-chain updates across the entire
     select -> compute -> insert -> commit sequence to prevent chain forks.
@@ -46,16 +46,15 @@ async def audit_transaction(db: AsyncSession | None = None):
     In SQLite (local dev & tests), uses an in-process asyncio.Lock().
     """
     async with _chain_lock:
-        if db is not None:
-            try:
-                bind = db.get_bind()
-                if bind and bind.dialect.name == "postgresql":
-                    await db.execute(
-                        text("SELECT pg_advisory_xact_lock(:key)"),
-                        {"key": AUDIT_ADVISORY_LOCK_ID},
-                    )
-            except Exception:
-                pass
+        try:
+            bind = db.get_bind()
+            if bind and bind.dialect.name == "postgresql":
+                await db.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"),
+                    {"key": AUDIT_ADVISORY_LOCK_ID},
+                )
+        except Exception:
+            pass
         yield
 
 

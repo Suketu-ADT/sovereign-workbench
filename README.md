@@ -267,6 +267,22 @@ The entire chain can be exported as a verified JSON ledger anytime by opening th
 | **Phase 7** | Comprehensive Security Review & E2E Validation (Input boundaries, magic bytes, AST DoS caps, tamper proof) | ✅ Complete | 5 unit tests passed; 36/36 full pytest suite passed; 31/31 live integration tests passed |
 | **Phase 8** | Production Deployment & Air-Gapped Packaging (Docker Compose multi-container, health checks, offline bootstrap) | ✅ Complete | Multi-container stack (FastAPI + Nginx reverse proxy), non-root containers, offline bootstrap verified |
 
+## 🛡️ Production Hardening & Multi-Worker Concurrency Architecture
+
+To guarantee mission-critical reliability across multi-worker deployments (e.g. `uvicorn --workers N`), Sovereign Workbench incorporates strict database-level concurrency and durability controls:
+
+1. **Alembic Startup Serialization**: Cold boots under multiple concurrent workers acquire a transaction-scoped PostgreSQL advisory lock (`MIGRATION_ADVISORY_LOCK_ID = 4242424243`), eliminating race conditions on `alembic_version` initialization.
+2. **Cryptographic Audit Ledger Advisory Locking**: All audit commits acquire `pg_advisory_xact_lock(AUDIT_ADVISORY_LOCK_ID = 4242424242)` using mandatory database sessions, guaranteeing zero gap or duplicate `idx` values under high-concurrency loads.
+3. **Cross-Worker HITL State Durability**:
+   - LangGraph checkpointer uses `AsyncPostgresSaver` (`langgraph-checkpoint-postgres`) backed by connection pooling, persisting paused execution graphs in PostgreSQL.
+   - Pending approvals are stored in a dedicated `pending_approvals` table in PostgreSQL, enabling any worker process to inspect, authorize, or reject sensitive actuator actions without session affinity or 404s.
+   - Dual-custody anti-self-approval and clearance checks operate directly against the database record, and status resolution is committed in the same atomic transaction as the audit ledger entry.
+4. **Dedicated Vector Database Service**: Replaces embedded file-based vector stores with standalone `qdrant/qdrant:v1.13.0` accessed via `QDRANT_URL`, ensuring synchronized multi-worker vector operations.
+5. **Prompt Guard Two-Tier Safety Architecture (Fail-Closed vs. Fail-Open Design)**:
+   - **Tier 1 (Deterministic OT Heuristics — Strict Fail-Closed)**: High-speed heuristic engine scans for prompt injections, system prompt extraction, delimiters, and unauthorized actuator bypass strings. Any match unconditionally halts the pipeline with HTTP 400 Bad Request.
+   - **Tier 2 (Llama-Guard-3 Semantic LLM — Fail-Open to Tier 1 with Circuit Breaker)**: Evaluates complex semantic ambiguities. In industrial SCADA environments, operational telemetry queries must not suffer total denial-of-service if an on-premise LLM server restarts or times out. When unreachable, the failure logs at `WARNING` level, the circuit breaker opens, and `GET /health` surfaces `prompt_guard_llm_status: "degraded"` while Tier 1 continues to block all adversarial syntax.
+6. **Production Startup Safeguards**: The application lifespan verifies `ENVIRONMENT=production` and refuses to boot if `JWT_SECRET` is left at the default placeholder or is weaker than 32 characters.
+
 ---
 
 ## 📜 Security Standards & Design Alignment

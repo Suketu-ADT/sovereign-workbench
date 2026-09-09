@@ -132,7 +132,7 @@ async def test_cryptographic_tamper_detection_proof():
 
     async with async_session_factory() as db:
         # Ensure at least 3 entries exist
-        async with audit_service.audit_transaction():
+        async with audit_service.audit_transaction(db):
             await audit_service.append_entry(db, "SECURITY_TEST_1", "Initial benchmark entry")
             await audit_service.append_entry(db, "SECURITY_TEST_2", "Second chained entry")
             await audit_service.append_entry(db, "SECURITY_TEST_3", "Third chained entry")

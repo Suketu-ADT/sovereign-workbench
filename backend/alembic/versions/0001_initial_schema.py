@@ -8,7 +8,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -21,7 +20,7 @@ def upgrade() -> None:
     # ── Users table ───────────────────────────────────────────
     op.create_table(
         "users",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("id", sa.Uuid(), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("full_name", sa.String(200), nullable=False),
         sa.Column("email", sa.String(254), nullable=False, unique=True),
         sa.Column("password_hash", sa.String(512), nullable=False),
@@ -42,7 +41,7 @@ def upgrade() -> None:
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("event_type", sa.String(100), nullable=False),
         sa.Column("detail", sa.Text, nullable=False, server_default=""),
-        sa.Column("actor_user_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("actor_user_id", sa.Uuid(), nullable=True),
         sa.Column("prev_hash", sa.String(64), nullable=False),
         sa.Column("hash", sa.String(64), nullable=False),
     )

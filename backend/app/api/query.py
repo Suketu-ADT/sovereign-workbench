@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.db.session import get_db
+from app.models.approval import PendingApproval
 from app.schemas.query import HITLApprovalDetails, QueryRequest, QueryResponse
 from app.services import (
     audit_service,
@@ -149,7 +150,7 @@ async def submit_query(
         )
 
     # ── Step 7: LangGraph Reasoning Loop & HITL Interruption ─
-    plan_result = planner_service.run_plan(
+    plan_result = await planner_service.run_plan(
         query=body.text,
         user_id=str(user_id),
         operator_email=current_user.get("email", ""),
@@ -237,6 +238,21 @@ async def submit_query(
                 ),
                 actor_user_id=user_id,
             )
+            pending_record = PendingApproval(
+                thread_id=thread_id,
+                requestor_user_id=user_id,
+                operator_email=current_user.get("email", ""),
+                clearance_level=clearance,
+                unit=unit,
+                authority=approval_details_dict.get(
+                    "authority", "Senior_Engineer (HITL Required)"
+                ),
+                action=approval_details_dict.get("action", "unknown"),
+                target=approval_details_dict.get("target", unit),
+                approval_details=approval_details_dict,
+                status="PENDING",
+            )
+            db.add(pending_record)
         else:
             await audit_service.append_entry(
                 db=db,
@@ -634,7 +650,7 @@ async def stream_query(
             "label": "Human Approval (HITL)",
             "desc": "Sensitive action authorization",
         })
-        plan_result = planner_service.run_plan(
+        plan_result = await planner_service.run_plan(
             query=body.text,
             user_id=str(user_id),
             operator_email=operator_email,
@@ -662,6 +678,21 @@ async def stream_query(
                         ),
                         actor_user_id=user_id,
                     )
+                    pending_record = PendingApproval(
+                        thread_id=thread_id,
+                        requestor_user_id=user_id,
+                        operator_email=operator_email,
+                        clearance_level=clearance,
+                        unit=unit,
+                        authority=approval_details.get(
+                            "authority", "Senior_Engineer (HITL Required)"
+                        ),
+                        action=approval_details.get("action", "unknown"),
+                        target=approval_details.get("target", unit),
+                        approval_details=approval_details,
+                        status="PENDING",
+                    )
+                    db.add(pending_record)
                     await db.commit()
             elapsed = int((time.time() - t_step) * 1000)
             yield _sse_event("step_complete", {
