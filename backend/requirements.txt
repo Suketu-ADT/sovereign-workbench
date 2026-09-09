@@ -12,3 +12,7 @@ email-validator>=2.0.0
 aiosqlite>=0.22.0
 qdrant-client>=1.19.0
 fastembed>=0.8.0
+opencv-python-headless>=4.10.0
+numpy>=2.0.0
+pillow>=10.0.0
+langgraph>=0.2.0

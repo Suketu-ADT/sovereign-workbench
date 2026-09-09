@@ -34,6 +34,24 @@ SENSITIVE_ACTIONS = {
     "override",
 }
 
+# Authority string to minimum required clearance mapping
+AUTHORITY_CLEARANCE_MAP = {
+    "Senior_Engineer (HITL Required)": 3,
+    "Plant_Director (HITL Required)": 3,
+    "Chief_Safety_Auditor (HITL Required)": 3,
+    "Operations_Lead (HITL Required)": 2,
+}
+
+
+def get_required_clearance_for_authority(authority: str | None) -> int:
+    """Derives required clearance level from authority specification string."""
+    if not authority:
+        return 3
+    for key, level in AUTHORITY_CLEARANCE_MAP.items():
+        if key.lower() in authority.lower() or authority.lower() in key.lower():
+            return level
+    return 3
+
 
 class PlanState(TypedDict):
     thread_id: str
@@ -293,6 +311,14 @@ class PlannerService:
             "synthesis": resumed_state.get("final_synthesis"),
             "action_status": resumed_state.get("action_status"),
         }
+
+    def get_required_clearance_for_authority(self, authority: str | None) -> int:
+        """Derives required clearance level from authority specification string."""
+        return get_required_clearance_for_authority(authority)
+
+    def get_pending_approval(self, thread_id: str) -> dict[str, Any] | None:
+        """Returns pending approval metadata if active, or None."""
+        return self._pending_approvals.get(thread_id)
 
     def list_pending_approvals(self) -> list[dict[str, Any]]:
         """Returns all currently active pending approvals."""

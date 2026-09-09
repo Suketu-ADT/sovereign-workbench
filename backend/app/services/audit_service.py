@@ -21,7 +21,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditEntry
@@ -29,16 +29,33 @@ from app.models.audit import AuditEntry
 # 64 zero characters — the genesis entry's prev_hash
 GENESIS_PREV_HASH = "0" * 64
 
+# Fixed 64-bit key for PostgreSQL transaction-level advisory locking
+AUDIT_ADVISORY_LOCK_ID = 4242424242
+
 _chain_lock = asyncio.Lock()
 
 
 @asynccontextmanager
-async def audit_transaction():
+async def audit_transaction(db: AsyncSession | None = None):
     """
     Async context manager that serializes hash-chain updates across the entire
     select -> compute -> insert -> commit sequence to prevent chain forks.
+
+    In PostgreSQL (multi-worker/multi-instance production), acquires a database-level
+    pg_advisory_xact_lock() that automatically releases on commit or rollback.
+    In SQLite (local dev & tests), uses an in-process asyncio.Lock().
     """
     async with _chain_lock:
+        if db is not None:
+            try:
+                bind = db.get_bind()
+                if bind and bind.dialect.name == "postgresql":
+                    await db.execute(
+                        text("SELECT pg_advisory_xact_lock(:key)"),
+                        {"key": AUDIT_ADVISORY_LOCK_ID},
+                    )
+            except Exception:
+                pass
         yield
 
 

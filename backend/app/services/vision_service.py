@@ -177,35 +177,62 @@ class VisionService:
     ) -> VisionResult:
         """
         Processes gauge photo to extract numerical pressure reading.
-        Uses local VLM if running, with deterministic OpenCV needle analysis fallback.
+        Distinguishes 3 distinct outcomes:
+          (a) No image provided -> status='skipped', reading=None
+          (b) Image decode / validation failed -> status='invalid_image', reading=None
+          (c) Successful decode & extraction -> status='success', reading=float
         """
-        reading = 6.4
-        confidence = 0.96
-
-        if image_data:
-            # 1. Try local VLM if enabled
-            if isinstance(image_data, str) and "," in image_data:
-                b64_str = image_data.split(",", 1)[1]
-            elif isinstance(image_data, bytes):
-                b64_str = base64.b64encode(image_data).decode("utf-8")
-            else:
-                b64_str = str(image_data)
-
-            vlm_res = await self._call_local_vlm(
-                b64_str,
-                "Extract the pressure gauge reading in bar and return JSON with keys: reading, confidence."
+        # Outcome (a): No image provided (legitimate skip)
+        if not image_data or (isinstance(image_data, str) and not image_data.strip()):
+            return VisionResult(
+                status="skipped",
+                reading=None,
+                unit="bar",
+                parameter="inlet_pressure",
+                confidence=0.0,
+                assessment="No visual asset attached — skipped",
+                error=None,
             )
-            if vlm_res and "reading" in vlm_res:
-                try:
-                    reading = float(vlm_res["reading"])
-                    confidence = float(vlm_res.get("confidence", 0.95))
-                except (ValueError, TypeError):
-                    pass
-            else:
-                # 2. OpenCV computer vision needle extraction
-                img = self._decode_image_bytes(image_data)
-                if img is not None:
-                    reading, confidence = self._analyze_gauge_opencv(img)
+
+        # Outcome (b): Decode image buffer and validate magic bytes & size
+        img = self._decode_image_bytes(image_data)
+        if img is None:
+            return VisionResult(
+                status="invalid_image",
+                reading=None,
+                unit="bar",
+                parameter="inlet_pressure",
+                confidence=0.0,
+                assessment="Visual asset rejected: corrupted payload, invalid magic bytes, or unsupported dimensions",
+                error="Invalid or corrupted image format",
+            )
+
+        # Outcome (c): Valid image decoded -> perform VLM or OpenCV extraction
+        reading = None
+        confidence = 0.0
+
+        # 1. Try local VLM if enabled
+        if isinstance(image_data, str) and "," in image_data:
+            b64_str = image_data.split(",", 1)[1]
+        elif isinstance(image_data, bytes):
+            b64_str = base64.b64encode(image_data).decode("utf-8")
+        else:
+            b64_str = str(image_data)
+
+        vlm_res = await self._call_local_vlm(
+            b64_str,
+            "Extract the pressure gauge reading in bar and return JSON with keys: reading, confidence."
+        )
+        if vlm_res and "reading" in vlm_res:
+            try:
+                reading = float(vlm_res["reading"])
+                confidence = float(vlm_res.get("confidence", 0.95))
+            except (ValueError, TypeError):
+                pass
+
+        if reading is None:
+            # 2. OpenCV computer vision needle extraction
+            reading, confidence = self._analyze_gauge_opencv(img)
 
         # Formulate assessment based on operational equipment parameters
         if equipment_unit == "boiler-102" or "boiler" in equipment_unit:
@@ -219,11 +246,13 @@ class VisionService:
             assessment = f"Measured {reading} bar (Confidence: {confidence})"
 
         return VisionResult(
+            status="success",
             reading=reading,
             unit="bar",
             parameter="inlet_pressure",
             confidence=confidence,
             assessment=assessment,
+            error=None,
         )
 
     def generate_synthetic_gauge(self, pressure_bar: float = 6.4) -> str:

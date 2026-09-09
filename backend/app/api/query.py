@@ -52,7 +52,7 @@ async def submit_query(
     allowed, retry_after = rate_limiter.check_rate_limit(user_id)
 
     if not allowed:
-        async with audit_service.audit_transaction():
+        async with audit_service.audit_transaction(db):
             await audit_service.append_entry(
                 db=db,
                 event_type="RATE_LIMIT_BLOCK",
@@ -73,7 +73,7 @@ async def submit_query(
     safe, reason = await prompt_guard.is_safe(body.text)
 
     if not safe:
-        async with audit_service.audit_transaction():
+        async with audit_service.audit_transaction(db):
             await audit_service.append_entry(
                 db=db,
                 event_type="PROMPT_SAFETY_BLOCK",
@@ -94,7 +94,7 @@ async def submit_query(
     rbac_allowed, required_level = rbac_service.check_access(body.text, clearance)
 
     if not rbac_allowed:
-        async with audit_service.audit_transaction():
+        async with audit_service.audit_transaction(db):
             await audit_service.append_entry(
                 db=db,
                 event_type="RBAC_BLOCK",
@@ -131,8 +131,9 @@ async def submit_query(
         unit = "boiler-102"
 
     # ── Step 5: Vision Extraction (multimodal gauge reading) ─
+    has_image_requested = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
     vision_result = None
-    if body.has_image or body.image_data or "gauge" in lower_text or "photo" in lower_text:
+    if has_image_requested:
         vision_result = await vision_service.extract_gauge_reading(
             image_data=body.image_data,
             equipment_unit=unit,
@@ -140,16 +141,9 @@ async def submit_query(
 
     # ── Step 6: Sandboxed Calculation (deterministic delta-p) ─
     calc_result = None
-    if (
-        vision_result is not None
-        or "calculate" in lower_text
-        or "pressure drop" in lower_text
-        or "delta" in lower_text
-        or "valve" in lower_text
-    ):
-        inlet = vision_result.reading if vision_result else 6.4
+    if vision_result and vision_result.status == "success" and vision_result.reading is not None:
         calc_result = calculation_service.compute_differential_pressure(
-            inlet_pressure=inlet,
+            inlet_pressure=vision_result.reading,
             outlet_pressure=2.6,
             equipment_unit=unit,
         )
@@ -162,7 +156,7 @@ async def submit_query(
         clearance_level=clearance,
         unit=unit,
         retrieved_docs=[c.model_dump() for c in retrieved_chunks],
-        vision_reading=vision_result.reading if vision_result else None,
+        vision_reading=vision_result.reading if (vision_result and vision_result.status == "success") else None,
         pressure_drop=calc_result.pressure_drop if calc_result else None,
     )
 
@@ -170,7 +164,7 @@ async def submit_query(
     thread_id = plan_result.get("thread_id")
     approval_details_dict = plan_result.get("approval_details")
 
-    async with audit_service.audit_transaction():
+    async with audit_service.audit_transaction(db):
         await audit_service.append_entry(
             db=db,
             event_type="QUERY_SUBMITTED",
@@ -200,14 +194,21 @@ async def submit_query(
 
         # Step 5 Audit: Vision extraction
         if vision_result:
-            await audit_service.append_entry(
-                db=db,
-                event_type="VISION_EXTRACTION",
-                detail=(
+            if vision_result.status == "success":
+                audit_vis_detail = (
                     f"Extracted {vision_result.reading} {vision_result.unit} "
                     f"({vision_result.parameter}, confidence {vision_result.confidence}) "
                     f"— {vision_result.assessment}"
-                ),
+                )
+            elif vision_result.status == "invalid_image":
+                audit_vis_detail = f"Visual asset rejected: {vision_result.error} — {vision_result.assessment}"
+            else:
+                audit_vis_detail = "No visual asset attached — skipped"
+
+            await audit_service.append_entry(
+                db=db,
+                event_type="VISION_EXTRACTION",
+                detail=audit_vis_detail,
                 actor_user_id=user_id,
             )
 
@@ -249,14 +250,18 @@ async def submit_query(
 
         # Query complete
         complete_status = "Awaiting HITL Authorization" if is_awaiting_approval else "Completed"
+        detail_items = [f"Query defense pipeline verified ({complete_status}): {len(retrieved_chunks)} docs retrieved"]
+        if vision_result:
+            if vision_result.status == "success":
+                detail_items.append(f"gauge: {vision_result.reading} bar")
+            elif vision_result.status == "invalid_image":
+                detail_items.append(f"gauge: rejected ({vision_result.error})")
+        if calc_result:
+            detail_items.append(f"delta-p: {calc_result.pressure_drop} bar")
         await audit_service.append_entry(
             db=db,
             event_type="QUERY_COMPLETE",
-            detail=(
-                f"Query defense pipeline verified ({complete_status}): {len(retrieved_chunks)} docs retrieved"
-                + (f", gauge: {vision_result.reading} bar" if vision_result else "")
-                + (f", delta-p: {calc_result.pressure_drop} bar" if calc_result else "")
-            ),
+            detail=", ".join(detail_items),
             actor_user_id=user_id,
         )
 
@@ -269,15 +274,18 @@ async def submit_query(
     )
 
     response_status = "awaiting_approval" if is_awaiting_approval else "accepted_stub"
-    response_note = (
-        "Sensitive actuator action proposed — workflow paused at HITL gate"
-        if is_awaiting_approval
-        else (
-            f"Retrieved {len(retrieved_chunks)} role-filtered manual chunks"
-            + (f", vision reading: {vision_result.reading} bar" if vision_result else "")
-            + (f", calculated delta-p: {calc_result.pressure_drop} bar ({calc_result.status})" if calc_result else "")
-        )
-    )
+    if is_awaiting_approval:
+        response_note = "Sensitive actuator action proposed — workflow paused at HITL gate"
+    else:
+        note_parts = [f"Retrieved {len(retrieved_chunks)} role-filtered manual chunks"]
+        if vision_result:
+            if vision_result.status == "success":
+                note_parts.append(f"vision reading: {vision_result.reading} bar")
+            elif vision_result.status == "invalid_image":
+                note_parts.append(f"vision error: {vision_result.error}")
+        if calc_result:
+            note_parts.append(f"calculated delta-p: {calc_result.pressure_drop} bar ({calc_result.status})")
+        response_note = ", ".join(note_parts)
 
     return QueryResponse(
         status=response_status,
@@ -343,7 +351,7 @@ async def stream_query(
         allowed, retry_after = rate_limiter.check_rate_limit(user_id)
         if not allowed:
             async with async_session_factory() as db:
-                async with audit_service.audit_transaction():
+                async with audit_service.audit_transaction(db):
                     entry = await audit_service.append_entry(
                         db=db,
                         event_type="RATE_LIMIT_BLOCK",
@@ -380,7 +388,7 @@ async def stream_query(
         safe, reason = await prompt_guard.is_safe(body.text)
         if not safe:
             async with async_session_factory() as db:
-                async with audit_service.audit_transaction():
+                async with audit_service.audit_transaction(db):
                     entry = await audit_service.append_entry(
                         db=db,
                         event_type="PROMPT_SAFETY_BLOCK",
@@ -417,7 +425,7 @@ async def stream_query(
         rbac_allowed, required_level = rbac_service.check_access(body.text, clearance)
         if not rbac_allowed:
             async with async_session_factory() as db:
-                async with audit_service.audit_transaction():
+                async with audit_service.audit_transaction(db):
                     entry = await audit_service.append_entry(
                         db=db,
                         event_type="RBAC_BLOCK",
@@ -471,7 +479,7 @@ async def stream_query(
             unit = "boiler-102"
 
         async with async_session_factory() as db:
-            async with audit_service.audit_transaction():
+            async with audit_service.audit_transaction(db):
                 await audit_service.append_entry(
                     db=db,
                     event_type="QUERY_SUBMITTED",
@@ -505,7 +513,7 @@ async def stream_query(
 
         # ── Step 5: Vision Extraction ─────────────────────────
         t_step = time.time()
-        has_image = bool(body.has_image or body.image_data or "gauge" in lower_text or "photo" in lower_text)
+        has_image = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
         vision_result = None
         if has_image:
             yield _sse_event("step_start", {
@@ -517,27 +525,53 @@ async def stream_query(
                 image_data=body.image_data,
                 equipment_unit=unit,
             )
-            async with async_session_factory() as db:
-                async with audit_service.audit_transaction():
-                    await audit_service.append_entry(
-                        db=db,
-                        event_type="VISION_EXTRACTION",
-                        detail=(
-                            f"Extracted {vision_result.reading} {vision_result.unit} "
-                            f"({vision_result.parameter}, confidence {vision_result.confidence}) "
-                            f"— {vision_result.assessment}"
-                        ),
-                        actor_user_id=user_id,
-                    )
-                    await db.commit()
             elapsed = int((time.time() - t_step) * 1000)
-            yield _sse_event("step_complete", {
-                "step": "vision",
-                "status": "passed",
-                "readout": f"Gauge: {vision_result.reading} bar inlet | Confidence: {vision_result.confidence}",
-                "vision": vision_result.model_dump(),
-                "elapsed_ms": elapsed,
-            })
+            if vision_result.status == "success":
+                async with async_session_factory() as db:
+                    async with audit_service.audit_transaction(db):
+                        await audit_service.append_entry(
+                            db=db,
+                            event_type="VISION_EXTRACTION",
+                            detail=(
+                                f"Extracted {vision_result.reading} {vision_result.unit} "
+                                f"({vision_result.parameter}, confidence {vision_result.confidence}) "
+                                f"— {vision_result.assessment}"
+                            ),
+                            actor_user_id=user_id,
+                        )
+                        await db.commit()
+                yield _sse_event("step_complete", {
+                    "step": "vision",
+                    "status": "passed",
+                    "readout": f"Gauge: {vision_result.reading} bar inlet | Confidence: {vision_result.confidence}",
+                    "vision": vision_result.model_dump(),
+                    "elapsed_ms": elapsed,
+                })
+            elif vision_result.status == "invalid_image":
+                async with async_session_factory() as db:
+                    async with audit_service.audit_transaction(db):
+                        await audit_service.append_entry(
+                            db=db,
+                            event_type="VISION_EXTRACTION",
+                            detail=f"Visual asset rejected: {vision_result.error} — {vision_result.assessment}",
+                            actor_user_id=user_id,
+                        )
+                        await db.commit()
+                yield _sse_event("step_complete", {
+                    "step": "vision",
+                    "status": "failed",
+                    "readout": f"Image rejected: {vision_result.error}",
+                    "vision": vision_result.model_dump(),
+                    "elapsed_ms": elapsed,
+                })
+            else:
+                yield _sse_event("step_complete", {
+                    "step": "vision",
+                    "status": "skipped",
+                    "readout": "No visual asset attached — skipped",
+                    "vision": vision_result.model_dump(),
+                    "elapsed_ms": elapsed,
+                })
         else:
             yield _sse_event("step_complete", {
                 "step": "vision",
@@ -554,33 +588,43 @@ async def stream_query(
             "label": "Sandboxed Calculation",
             "desc": "Isolated compute environment",
         })
-        inlet = vision_result.reading if vision_result else 6.4
-        calc_result = calculation_service.compute_differential_pressure(
-            inlet_pressure=inlet,
-            outlet_pressure=2.6,
-            equipment_unit=unit,
-        )
-        async with async_session_factory() as db:
-            async with audit_service.audit_transaction():
-                await audit_service.append_entry(
-                    db=db,
-                    event_type="CALCULATION_RESULT",
-                    detail=(
-                        f"Sandboxed formula '{calc_result.formula}' evaluated to "
-                        f"{calc_result.pressure_drop} {calc_result.unit} "
-                        f"(nominal range: {calc_result.normal_range}) — Status: {calc_result.status}"
-                    ),
-                    actor_user_id=user_id,
-                )
-                await db.commit()
-        elapsed = int((time.time() - t_step) * 1000)
-        yield _sse_event("step_complete", {
-            "step": "calculation",
-            "status": "passed",
-            "readout": f"Δp = {calc_result.pressure_drop} bar | Range: {calc_result.normal_range} | {calc_result.status}",
-            "calculation": calc_result.model_dump(),
-            "elapsed_ms": elapsed,
-        })
+        calc_result = None
+        if vision_result and vision_result.status == "success" and vision_result.reading is not None:
+            calc_result = calculation_service.compute_differential_pressure(
+                inlet_pressure=vision_result.reading,
+                outlet_pressure=2.6,
+                equipment_unit=unit,
+            )
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction(db):
+                    await audit_service.append_entry(
+                        db=db,
+                        event_type="CALCULATION_RESULT",
+                        detail=(
+                            f"Sandboxed formula '{calc_result.formula}' evaluated to "
+                            f"{calc_result.pressure_drop} {calc_result.unit} "
+                            f"(nominal range: {calc_result.normal_range}) — Status: {calc_result.status}"
+                        ),
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            elapsed = int((time.time() - t_step) * 1000)
+            yield _sse_event("step_complete", {
+                "step": "calculation",
+                "status": "passed",
+                "readout": f"Δp = {calc_result.pressure_drop} bar | Range: {calc_result.normal_range} | {calc_result.status}",
+                "calculation": calc_result.model_dump(),
+                "elapsed_ms": elapsed,
+            })
+        else:
+            elapsed = int((time.time() - t_step) * 1000)
+            yield _sse_event("step_complete", {
+                "step": "calculation",
+                "status": "skipped",
+                "readout": "Calculation skipped: no verified visual telemetry reading",
+                "calculation": None,
+                "elapsed_ms": elapsed,
+            })
         await asyncio.sleep(0.04)
 
         # ── Step 7: Reasoning Loop & HITL Interruption ────────
@@ -597,7 +641,7 @@ async def stream_query(
             clearance_level=clearance,
             unit=unit,
             retrieved_docs=[c.model_dump() for c in retrieved_chunks],
-            vision_reading=vision_result.reading if vision_result else None,
+            vision_reading=vision_result.reading if (vision_result and vision_result.status == "success") else None,
             pressure_drop=calc_result.pressure_drop if calc_result else None,
         )
 
@@ -607,7 +651,7 @@ async def stream_query(
 
         if is_awaiting and approval_details:
             async with async_session_factory() as db:
-                async with audit_service.audit_transaction():
+                async with audit_service.audit_transaction(db):
                     entry = await audit_service.append_entry(
                         db=db,
                         event_type="HITL_REQUIRED",
@@ -641,7 +685,7 @@ async def stream_query(
             return
         else:
             async with async_session_factory() as db:
-                async with audit_service.audit_transaction():
+                async with audit_service.audit_transaction(db):
                     await audit_service.append_entry(
                         db=db,
                         event_type="PLAN_GENERATED",
@@ -669,13 +713,13 @@ async def stream_query(
             "desc": "Hash-chain entry commitment",
         })
         async with async_session_factory() as db:
-            async with audit_service.audit_transaction():
+            async with audit_service.audit_transaction(db):
                 entry = await audit_service.append_entry(
                     db=db,
                     event_type="QUERY_COMPLETE",
                     detail=(
                         f"Query defense pipeline verified (Completed): {len(retrieved_chunks)} docs retrieved"
-                        + (f", gauge: {vision_result.reading} bar" if vision_result else "")
+                        + (f", gauge: {vision_result.reading} bar" if (vision_result and vision_result.status == "success") else "")
                         + (f", delta-p: {calc_result.pressure_drop} bar" if calc_result else "")
                     ),
                     actor_user_id=user_id,

@@ -53,18 +53,22 @@ SEED_OPERATORS = [
 
 async def seed_database(db: AsyncSession) -> None:
     """
-    Seed demo operators and genesis audit entry if the users table
-    is empty. Safe to call on every startup — no-ops if data exists.
+    Seed demo operators and genesis audit entry.
+    Uses conflict-free idempotent upsert (ON CONFLICT (email) DO NOTHING)
+    so concurrent multi-worker processes never race or fail on startup.
     """
-    result = await db.execute(select(User).limit(1))
-    if result.scalars().first() is not None:
-        logger.info("Database already seeded — skipping.")
-        return
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    from app.models.audit import AuditEntry
+
+    bind = db.get_bind()
+    is_pg = bool(bind and bind.dialect.name == "postgresql")
+    insert_fn = pg_insert if is_pg else sqlite_insert
 
     password_hash = hash_password(settings.SEED_PASSWORD)
 
     for op in SEED_OPERATORS:
-        user = User(
+        stmt = insert_fn(User).values(
             full_name=op["full_name"],
             email=op["email"],
             password_hash=password_hash,
@@ -73,19 +77,26 @@ async def seed_database(db: AsyncSession) -> None:
             clearance_name=op["clearance_name"],
             tier=op["tier"],
             avatar=op["avatar"],
-        )
-        db.add(user)
-        logger.info("Seeded operator: %s (%s)", op["full_name"], op["email"])
+        ).on_conflict_do_nothing(index_elements=["email"])
+        await db.execute(stmt)
 
     await db.flush()
 
-    # Genesis audit entry
-    async with audit_transaction():
-        await append_entry(
-            db=db,
-            event_type="GENESIS",
-            detail="Sovereign Workbench audit chain initialized",
-            actor_user_id=None,
-        )
+    # Genesis audit entry — check if table already has entries
+    result = await db.execute(select(AuditEntry).limit(1))
+    if result.scalars().first() is None:
+        async with audit_transaction(db):
+            # Double check inside the serialized lock
+            res2 = await db.execute(select(AuditEntry).limit(1))
+            if res2.scalars().first() is None:
+                await append_entry(
+                    db=db,
+                    event_type="GENESIS",
+                    detail="Sovereign Workbench audit chain initialized",
+                    actor_user_id=None,
+                )
+                await db.commit()
+    else:
         await db.commit()
-    logger.info("Database seeded successfully with %d operators.", len(SEED_OPERATORS))
+
+    logger.info("Database seed completed successfully.")

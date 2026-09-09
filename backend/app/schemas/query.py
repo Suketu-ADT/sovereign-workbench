@@ -32,11 +32,13 @@ class RetrievedChunk(BaseModel):
 
 
 class VisionResult(BaseModel):
-    reading: float
+    status: str = "success"  # "success", "skipped", "invalid_image"
+    reading: float | None = None
     unit: str = "bar"
     parameter: str = "inlet_pressure"
-    confidence: float
+    confidence: float = 0.0
     assessment: str
+    error: str | None = None
 
 
 class CalculationResult(BaseModel):

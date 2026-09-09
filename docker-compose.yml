@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sovereign-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sovereign
+      POSTGRES_PASSWORD: sovereign_db_secret_pass_123
+      POSTGRES_DB: sovereign
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sovereign"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sovereign-net
+
   backend:
     build:
       context: ./backend
@@ -9,7 +27,7 @@ services:
       - "8000:8000"
     environment:
       - ENVIRONMENT=production
-      - DATABASE_URL=sqlite+aiosqlite:////app/data/sovereign.db
+      - DATABASE_URL=postgresql+asyncpg://sovereign:sovereign_db_secret_pass_123@postgres:5432/sovereign
       - QDRANT_STORAGE_PATH=/app/data/qdrant_storage
       - FASTEMBED_CACHE_PATH=/app/data/fastembed_cache
       - JWT_SECRET=sovereign_industrial_airgapped_super_secret_key_change_in_prod_12345
@@ -19,6 +37,9 @@ services:
       - PLANNER_MODEL_ENABLED=false
     volumes:
       - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -45,6 +66,9 @@ services:
         condition: service_healthy
     networks:
       - sovereign-net
+
+volumes:
+  pgdata:
 
 networks:
   sovereign-net:

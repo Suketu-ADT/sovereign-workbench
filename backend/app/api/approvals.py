@@ -62,6 +62,39 @@ async def submit_approval_decision(
             detail="Decision must be 'approve' or 'reject'",
         )
 
+    # 1. Fetch pending approval
+    pending = planner_service.get_pending_approval(thread_id)
+    if not pending:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pending approval for thread '{thread_id}' not found or already resolved",
+        )
+
+    # 2. Strict Anti-Self-Approval Enforcement (Dual-Custody Separation of Duties)
+    current_sub = str(current_user.get("sub", ""))
+    requestor_id = str(pending.get("user_id", ""))
+    if current_sub and requestor_id and current_sub == requestor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Self-approval forbidden: The operator who requested the sensitive action "
+                "cannot approve it. Dual-custody authorization is strictly required."
+            ),
+        )
+
+    # 3. Clearance Level Enforcement derived from Authority Specification
+    authority = pending.get("approval_details", {}).get("authority")
+    required_clearance = planner_service.get_required_clearance_for_authority(authority)
+    approver_clearance = current_user.get("clearance_level", 0)
+    if approver_clearance < required_clearance:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Insufficient clearance: Sensitive action authorization requires clearance level "
+                f"{required_clearance} ({authority}), but current operator has level {approver_clearance}."
+            ),
+        )
+
     approved = decision_lower in ("approve", "approved")
     operator_email = current_user.get("email", "operator")
     operator_role = current_user.get("role", "Operator")

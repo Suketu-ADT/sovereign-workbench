@@ -241,7 +241,30 @@ def run_tests():
         f"GET /approvals/pending: 200 OK (found thread {thread_id} in {len(pending_list)} pending approval items)"
     )
 
-    # 24. Phase 5 - Operator Decision (Approve Action & Resume Execution)
+    # 24. Phase 5 - Authorization Enforcement on HITL Decision Endpoint
+    # 24a. Self-Approval Blocked (Security Rule: Requestor cannot approve their own action)
+    r_self = client.post(
+        f"/approvals/{thread_id}/decision",
+        json={"decision": "approve", "comment": "John Morrison self-approving his own request"},
+        headers=headers_john,
+    )
+    record(
+        r_self.status_code == 403 and "Self-approval forbidden" in r_self.json().get("detail", ""),
+        f"POST /approvals/{thread_id}/decision (Self-Approval Denied): 403 Forbidden ({r_self.json().get('detail')})"
+    )
+
+    # 24b. Insufficient Clearance Blocked (Security Rule: L2 cannot approve L3 action)
+    r_l2 = client.post(
+        f"/approvals/{thread_id}/decision",
+        json={"decision": "approve", "comment": "Dr. Elena Vance (Level 2) approving Senior Engineer action"},
+        headers=headers_elena,
+    )
+    record(
+        r_l2.status_code == 403 and "Insufficient clearance" in r_l2.json().get("detail", ""),
+        f"POST /approvals/{thread_id}/decision (Clearance Check Blocked): 403 Forbidden ({r_l2.json().get('detail')})"
+    )
+
+    # 24c. Authorized Dual-Custody Approval (Suketu Patel, Level 3 Chief Auditor)
     r = client.post(
         f"/approvals/{thread_id}/decision",
         json={"decision": "approve", "comment": "Approved by Chief Auditor Suketu Patel for test"},
@@ -338,16 +361,24 @@ def run_tests():
         f"Input Bounds (Null-byte injection): {r.status_code} Unprocessable Entity (strictly rejected null byte)"
     )
 
-    # 31. Phase 7 - Vision Robustness: Corrupted image base64 handled gracefully
+    # 31. Phase 7 - Vision Robustness: Corrupted image base64 rejected without fake reading (Fix 2)
     fake_b64 = "Tk9UX0FfUkVBTF9JTUFHRV9IRUFERVJfQ09OVEVOVA=="
     r = client.post(
         "/query",
         json={"text": "Read boiler-102 gauge pressure", "has_image": True, "image_data": fake_b64},
         headers=headers_john,
     )
+    res_data = r.json()
+    vis = res_data.get("vision_analysis")
+    calc = res_data.get("calculation_result")
     record(
-        r.status_code == 200 and r.json().get("status") in ("accepted_stub", "awaiting_approval"),
-        f"Vision Robustness (Corrupted image magic bytes): 200 OK (graceful fallback without 500 error)"
+        r.status_code == 200
+        and res_data.get("status") in ("accepted_stub", "awaiting_approval")
+        and vis is not None
+        and vis.get("status") == "invalid_image"
+        and vis.get("reading") is None
+        and calc is None,
+        f"Vision Robustness (Corrupted image magic bytes): 200 OK (invalid_image, reading=None, calc=None — no fabricated data)",
     )
 
     print("=" * 60)

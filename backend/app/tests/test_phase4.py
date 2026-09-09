@@ -143,3 +143,105 @@ async def test_query_pipeline_vision_and_calculation_integration():
         assert verify_data["valid"] is True
         assert verify_data["broken_at_index"] is None
         assert verify_data["entries_checked"] > 0
+
+
+@pytest.mark.asyncio
+async def test_vision_service_outcomes_tri_state():
+    """
+    Verifies that VisionService distinguishes three explicit outcomes:
+      (a) No image provided -> status='skipped', reading=None
+      (b) Corrupted/invalid/oversized image -> status='invalid_image', reading=None, error set
+      (c) Genuine decode -> status='success', reading=float
+    """
+    import base64
+
+    # Outcome (a): No image
+    res_none = await vision_service.extract_gauge_reading(image_data=None)
+    assert res_none.status == "skipped"
+    assert res_none.reading is None
+    assert res_none.error is None
+
+    res_empty_str = await vision_service.extract_gauge_reading(image_data="   ")
+    assert res_empty_str.status == "skipped"
+    assert res_empty_str.reading is None
+
+    # Outcome (b): Invalid magic bytes
+    bad_bytes_b64 = base64.b64encode(b"NOT_A_VALID_IMAGE_HEADER_1234567890").decode("utf-8")
+    res_bad = await vision_service.extract_gauge_reading(image_data=bad_bytes_b64)
+    assert res_bad.status == "invalid_image"
+    assert res_bad.reading is None
+    assert res_bad.error is not None
+    assert "rejected" in res_bad.assessment.lower()
+
+    # Outcome (b): Oversized payload (>5MB)
+    huge_payload = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * (5 * 1024 * 1024 + 100)).decode("utf-8")
+    res_huge = await vision_service.extract_gauge_reading(image_data=huge_payload)
+    assert res_huge.status == "invalid_image"
+    assert res_huge.reading is None
+    assert res_huge.error is not None
+
+    # Outcome (c): Valid image
+    gauge_b64 = vision_service.generate_synthetic_gauge(pressure_bar=6.4)
+    res_good = await vision_service.extract_gauge_reading(image_data=gauge_b64)
+    assert res_good.status == "success"
+    assert res_good.reading is not None
+    assert abs(res_good.reading - 6.4) <= 0.2
+    assert res_good.error is None
+
+
+@pytest.mark.asyncio
+async def test_query_pipeline_with_corrupted_image_no_fake_reading():
+    """
+    Asserts that POST /query with has_image=True and corrupted bytes:
+    1. Returns vision_analysis with status='invalid_image' and reading=None (never fake 6.4 bar).
+    2. Does NOT execute or fabricate differential pressure calculation (calc_result is None).
+    3. Logs visual asset rejection in audit log and zero fake CALCULATION_RESULT entries.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/auth/login",
+            json={"email": "j.morrison@plant.internal", "password": "changeme123"},
+        )
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Get head index before query
+        pre_audit = await client.get("/audit?limit=1", headers=headers)
+        latest_idx_before = pre_audit.json()["entries"][0]["index"] if pre_audit.json()["entries"] else -1
+
+        # Send garbage image data
+        res = await client.post(
+            "/query",
+            json={
+                "text": "Read gauge photo on boiler-102 and calculate pressure drop",
+                "has_image": True,
+                "image_data": "Tk9UX0FfUkVBTF9JTUFHRV9IRUFERVI=",
+            },
+            headers=headers,
+        )
+        assert res.status_code == 200
+        data = res.json()
+
+        # Must explicitly flag rejection without fabricating reading
+        assert data["vision_analysis"] is not None
+        assert data["vision_analysis"]["status"] == "invalid_image"
+        assert data["vision_analysis"]["reading"] is None
+        assert data["vision_analysis"]["error"] is not None
+
+        # Must NOT fabricate calculation result from hallucinated reading
+        assert data["calculation_result"] is None
+
+        # Verify audit ledger
+        audit_res = await client.get("/audit?limit=10", headers=headers)
+        assert audit_res.status_code == 200
+        entries = audit_res.json()["entries"]
+
+        new_entries = [e for e in entries if e["index"] > latest_idx_before]
+        vis_entries = [e for e in new_entries if e["event"] == "VISION_EXTRACTION"]
+        assert len(vis_entries) > 0
+        assert "rejected" in vis_entries[0]["detail"].lower()
+
+        calc_entries = [e for e in new_entries if e["event"] == "CALCULATION_RESULT"]
+        # No calculation entry should have been recorded for this request
+        assert len(calc_entries) == 0

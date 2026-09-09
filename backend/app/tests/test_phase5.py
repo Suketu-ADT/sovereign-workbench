@@ -144,11 +144,20 @@ async def test_approvals_api_lifecycle():
         pending_list = pending_res.json()["approvals"]
         assert any(p["thread_id"] == thread_id for p in pending_list)
 
-        # 3. Authorize action (approve)
+        # Login Suketu Patel (Level 3 - Chief Safety Auditor)
+        login_suketu = await client.post(
+            "/auth/login",
+            json={"email": "suketu.2005@gmail.com", "password": "changeme123"},
+        )
+        assert login_suketu.status_code == 200
+        token_suketu = login_suketu.json()["access_token"]
+        headers_suketu = {"Authorization": f"Bearer {token_suketu}"}
+
+        # 3. Authorize action by Level 3 operator (Suketu Patel)
         decision_res = await client.post(
             f"/approvals/{thread_id}/decision",
-            json={"decision": "approve", "comment": "Senior engineer confirmed relief pressure."},
-            headers=headers_john,
+            json={"decision": "approve", "comment": "Chief Auditor confirmed relief pressure."},
+            headers=headers_suketu,
         )
         assert decision_res.status_code == 200
         decision_data = decision_res.json()
@@ -157,7 +166,7 @@ async def test_approvals_api_lifecycle():
         assert decision_data["audit_hash"] is not None
 
         # 4. Verify audit ledger entries
-        audit_res = await client.get("/audit?limit=25", headers=headers_john)
+        audit_res = await client.get("/audit?limit=25", headers=headers_suketu)
         assert audit_res.status_code == 200
         entries = audit_res.json()["entries"]
 
@@ -170,8 +179,87 @@ async def test_approvals_api_lifecycle():
         assert "approved" in hitl_app_entries[0]["detail"]
 
         # 5. Verify cryptographic hash chain integrity
-        verify_res = await client.get("/audit/verify", headers=headers_john)
+        verify_res = await client.get("/audit/verify", headers=headers_suketu)
         assert verify_res.status_code == 200
         verify_data = verify_res.json()
         assert verify_data["valid"] is True
         assert verify_data["broken_at_index"] is None
+
+
+@pytest.mark.asyncio
+async def test_approvals_self_approval_and_clearance_enforcement():
+    """
+    Asserts strict dual-custody authorization:
+    1. Requestor cannot approve their own action (403 Forbidden even if Level 3).
+    2. Lower clearance operator (Level 1 / 2) cannot approve action requiring Level 3 (403 Forbidden).
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Login John Morrison (Level 1)
+        res_john = await client.post(
+            "/auth/login",
+            json={"email": "j.morrison@plant.internal", "password": "changeme123"},
+        )
+        token_john = res_john.json()["access_token"]
+        headers_john = {"Authorization": f"Bearer {token_john}"}
+
+        # Login Elena Vance (Level 2)
+        res_vance = await client.post(
+            "/auth/login",
+            json={"email": "elena.vance@plant.internal", "password": "changeme123"},
+        )
+        token_vance = res_vance.json()["access_token"]
+        headers_vance = {"Authorization": f"Bearer {token_vance}"}
+
+        # Login Suketu Patel (Level 3)
+        res_suketu = await client.post(
+            "/auth/login",
+            json={"email": "suketu.2005@gmail.com", "password": "changeme123"},
+        )
+        token_suketu = res_suketu.json()["access_token"]
+        headers_suketu = {"Authorization": f"Bearer {token_suketu}"}
+
+        # Scenario 1: John (L1) requests open_release_valve
+        q_res = await client.post(
+            "/query",
+            json={"text": "Open release valve on boiler-102 immediately", "has_image": False},
+            headers=headers_john,
+        )
+        assert q_res.status_code == 200
+        thread_id = q_res.json()["thread_id"]
+
+        # 1a. Self-approval attempt by John (L1) -> 403 Forbidden
+        self_app_res = await client.post(
+            f"/approvals/{thread_id}/decision",
+            json={"decision": "approve", "comment": "I approve my own request"},
+            headers=headers_john,
+        )
+        assert self_app_res.status_code == 403
+        assert "Self-approval forbidden" in self_app_res.json()["detail"]
+
+        # 1b. Approval attempt by Elena Vance (L2, not requestor, but L2 < required L3) -> 403 Forbidden
+        clearance_app_res = await client.post(
+            f"/approvals/{thread_id}/decision",
+            json={"decision": "approve", "comment": "L2 specialist approving"},
+            headers=headers_vance,
+        )
+        assert clearance_app_res.status_code == 403
+        assert "Insufficient clearance" in clearance_app_res.json()["detail"]
+
+        # Scenario 2: Suketu Patel (Level 3) requests an action, then attempts self-approval
+        q_res_l3 = await client.post(
+            "/query",
+            json={"text": "Open release valve on boiler-102 emergency override", "has_image": False},
+            headers=headers_suketu,
+        )
+        assert q_res_l3.status_code == 200
+        thread_id_l3 = q_res_l3.json()["thread_id"]
+
+        # Suketu attempts self-approval -> 403 Forbidden regardless of having Level 3!
+        self_app_l3_res = await client.post(
+            f"/approvals/{thread_id_l3}/decision",
+            json={"decision": "approve", "comment": "Director approving self"},
+            headers=headers_suketu,
+        )
+        assert self_app_l3_res.status_code == 403
+        assert "Self-approval forbidden" in self_app_l3_res.json()["detail"]

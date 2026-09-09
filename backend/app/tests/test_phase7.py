@@ -56,7 +56,9 @@ async def test_corrupted_image_magic_bytes_rejected():
     fake_b64 = base64.b64encode(fake_image_bytes).decode("ascii")
     result = await vision_service.extract_gauge_reading(fake_b64)
     assert result is not None
-    assert result.reading > 0  # Fallback calibration reading returned safely
+    assert result.status == "invalid_image"
+    assert result.reading is None
+    assert result.error is not None
 
     # Test via query endpoint with corrupted image base64
     transport = ASGITransport(app=app)
@@ -81,6 +83,10 @@ async def test_corrupted_image_magic_bytes_rejected():
         assert res.status_code == 200
         data = res.json()
         assert data["status"] in ("accepted_stub", "awaiting_approval")
+        assert data["vision_analysis"] is not None
+        assert data["vision_analysis"]["status"] == "invalid_image"
+        assert data["vision_analysis"]["reading"] is None
+        assert data["calculation_result"] is None
 
 
 def test_ast_calculation_security_bounds():
@@ -235,11 +241,11 @@ async def test_e2e_multi_operator_journey():
         assert res3.status_code == 200
         assert res3.json()["status"] in ("accepted_stub", "awaiting_approval")
 
-        # Operator 3 (L3) triggers sensitive actuator command -> HITL interruption
+        # Operator 1 (L1) triggers sensitive actuator command -> HITL interruption
         res_actuator = await ac.post(
             "/query",
             json={"text": "Emergency: open_release_valve on boiler-102 immediately", "has_image": False},
-            headers={"Authorization": f"Bearer {token_l3}"},
+            headers={"Authorization": f"Bearer {token_l1}"},
         )
         assert res_actuator.status_code == 200
         actuator_data = res_actuator.json()
