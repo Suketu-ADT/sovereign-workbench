@@ -116,45 +116,61 @@ def run_tests():
     )
 
     # 11. RBAC - Level 1 (John Morrison) queries boiler-102 (Allowed: requires L1)
-    r = client.post("/query", json={"text": "Inspect boiler-102 pressure manifold", "has_image": False}, headers=headers_john)
-    record(r.status_code == 200 and r.json().get("status") == "accepted_stub", f"RBAC L1 querying boiler-102: 200 ALLOWED ({r.json().get('status')})")
+    r = client.post("/query", json={"text": "Inspect boiler-102 operating pressure envelope", "has_image": False}, headers=headers_john)
+    chunks_l1 = r.json().get("retrieved_chunks", [])
+    record(
+        r.status_code == 200 and len(chunks_l1) > 0 and all(c.get("min_clearance") <= 1 for c in chunks_l1),
+        f"RBAC L1 querying boiler-102: 200 ALLOWED (retrieved {len(chunks_l1)} L1 chunks, top: {chunks_l1[0].get('sop_id') if chunks_l1 else 'none'})"
+    )
 
-    # 10. RBAC - Level 1 (John Morrison) queries turbine-gen-4 (Forbidden: requires L2)
+    # 12. RBAC - Level 1 (John Morrison) queries turbine-gen-4 (Forbidden: requires L2)
     r = client.post("/query", json={"text": "Inspect turbine-gen-4 vibration sensor", "has_image": False}, headers=headers_john)
     record(
         r.status_code == 403 and r.json().get("detail", {}).get("required_level") == 2,
         f"RBAC L1 querying turbine-gen-4: 403 FORBIDDEN (required: {r.json().get('detail', {}).get('required_level')}, current: {r.json().get('detail', {}).get('current_level')})"
     )
 
-    # 11. RBAC - Level 1 (John Morrison) queries reactor-core-aux (Forbidden: requires L3)
+    # 13. RBAC - Level 1 (John Morrison) queries reactor-core-aux (Forbidden: requires L3)
     r = client.post("/query", json={"text": "Inspect reactor-core-aux cooling assembly", "has_image": False}, headers=headers_john)
     record(
         r.status_code == 403 and r.json().get("detail", {}).get("required_level") == 3,
         f"RBAC L1 querying reactor-core-aux: 403 FORBIDDEN (required: {r.json().get('detail', {}).get('required_level')}, current: {r.json().get('detail', {}).get('current_level')})"
     )
 
-    # 12. RBAC - Level 2 (Dr. Elena Vance) queries turbine-gen-4 (Allowed: requires L2)
-    r = client.post("/query", json={"text": "Run diagnostics on turbine-gen-4", "has_image": False}, headers=headers_elena)
-    record(r.status_code == 200, f"RBAC L2 querying turbine-gen-4: 200 ALLOWED")
+    # 14. RBAC - Level 2 (Dr. Elena Vance) queries turbine-gen-4 (Allowed: requires L2)
+    r = client.post("/query", json={"text": "Check turbine-gen-4 rotor dynamics and vibration velocity limits", "has_image": False}, headers=headers_elena)
+    chunks_l2 = r.json().get("retrieved_chunks", [])
+    record(
+        r.status_code == 200 and len(chunks_l2) > 0 and all(c.get("min_clearance") <= 2 for c in chunks_l2) and chunks_l2[0].get("sop_id") == "SOP-204-1",
+        f"RBAC L2 querying turbine-gen-4: 200 ALLOWED (retrieved {len(chunks_l2)} chunks, top: {chunks_l2[0].get('sop_id') if chunks_l2 else 'none'})"
+    )
 
-    # 13. RBAC - Level 2 (Dr. Elena Vance) queries reactor-core-aux (Forbidden: requires L3)
+    # 15. RBAC - Level 2 (Dr. Elena Vance) queries reactor-core-aux (Forbidden: requires L3)
     r = client.post("/query", json={"text": "Query reactor-core-aux status", "has_image": False}, headers=headers_elena)
     record(r.status_code == 403, f"RBAC L2 querying reactor-core-aux: 403 FORBIDDEN")
 
-    # 14. RBAC - Level 3 (Suketu Patel) queries reactor-core-aux (Allowed: requires L3)
-    r = client.post("/query", json={"text": "Full diagnostic on reactor-core-aux", "has_image": False}, headers=headers_suketu)
-    record(r.status_code == 200, f"RBAC L3 querying reactor-core-aux: 200 ALLOWED")
+    # 16. RBAC - Level 3 (Suketu Patel) queries reactor-core-aux (Allowed: requires L3)
+    r = client.post("/query", json={"text": "Emergency SCRAM rod timing on reactor-core-aux", "has_image": False}, headers=headers_suketu)
+    chunks_l3 = r.json().get("retrieved_chunks", [])
+    record(
+        r.status_code == 200 and len(chunks_l3) > 0 and chunks_l3[0].get("sop_id") == "SOP-301-1",
+        f"RBAC L3 querying reactor-core-aux: 200 ALLOWED (retrieved {len(chunks_l3)} chunks, top: {chunks_l3[0].get('sop_id') if chunks_l3 else 'none'})"
+    )
 
-    # 15. RBAC - Unrestricted query (general question with no unit keyword)
+    # 17. RBAC - Unrestricted query (general question with no unit keyword)
     r = client.post("/query", json={"text": "General maintenance procedures overview", "has_image": False}, headers=headers_john)
     record(r.status_code == 200, f"RBAC Unrestricted query (no unit): 200 ALLOWED")
 
-    # 16. Audit Log - List Entries
-    r = client.get("/audit?limit=10", headers=headers_suketu)
+    # 18. Audit Log - List Entries (Verify RETRIEVAL_CHUNKS_ACCESSED is present)
+    r = client.get("/audit?limit=20", headers=headers_suketu)
     entries = r.json().get("entries", [])
-    record(r.status_code == 200 and len(entries) > 0, f"GET /audit: 200 OK (returned {len(entries)} entries, newest index: {entries[0].get('index') if entries else 'None'})")
+    retrieval_logs = [e for e in entries if e.get("event") == "RETRIEVAL_CHUNKS_ACCESSED"]
+    record(
+        r.status_code == 200 and len(retrieval_logs) > 0,
+        f"GET /audit (RETRIEVAL_CHUNKS_ACCESSED): 200 OK (found {len(retrieval_logs)} retrieval audit events, newest: {retrieval_logs[0].get('detail')[:45]}...)"
+    )
 
-    # 17. Audit Log - Verify Hash Chain Cryptographic Integrity
+    # 19. Audit Log - Verify Hash Chain Cryptographic Integrity
     r = client.get("/audit/verify", headers=headers_suketu)
     verify_data = r.json()
     record(
@@ -162,13 +178,14 @@ def run_tests():
         f"GET /audit/verify: 200 OK, valid={verify_data.get('valid')}, entries_checked={verify_data.get('entries_checked')}, broken_at={verify_data.get('broken_at_index')}"
     )
 
-    # 18. Audit Log - Export Ledger
+    # 20. Audit Log - Export Ledger
     r = client.get("/audit/export", headers=headers_suketu)
     export_data = r.json()
     record(
         r.status_code == 200 and export_data.get("entryCount") > 0 and export_data.get("genesisHash") is not None,
         f"GET /audit/export: 200 OK, entryCount={export_data.get('entryCount')}, genesisHash={export_data.get('genesisHash')[:16]}..., headHash={export_data.get('currentHeadHash')[:16]}..."
     )
+
 
     print("=" * 60)
     total = len(results)

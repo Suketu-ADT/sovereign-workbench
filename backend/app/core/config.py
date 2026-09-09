@@ -33,5 +33,13 @@ class Settings(BaseSettings):
     PROMPT_GUARD_MODEL: str = "llama-guard3:1b"
     PROMPT_GUARD_TIMEOUT: float = 3.0
 
+    # ── Qdrant Vector DB & RAG ────────────────────────────────
+    QDRANT_STORAGE_PATH: str = "./qdrant_storage"
+    QDRANT_URL: str | None = None
+    QDRANT_COLLECTION: str = "operational_manuals"
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    RAG_TOP_K: int = 3
+
 
 settings = Settings()
+

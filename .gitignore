@@ -20,6 +20,9 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+qdrant_storage/
+backend/qdrant_storage/
+
 
 # Backend secrets
 backend/.env

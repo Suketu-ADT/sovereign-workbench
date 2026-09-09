@@ -15,6 +15,7 @@ from app.api import audit, auth, query
 from app.db.migrate import run_migrations
 from app.db.seed import seed_database
 from app.db.session import async_session_factory, engine
+from app.services import retrieval_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: run migrations and seed demo data. Shutdown: dispose engine."""
+    """Startup: run migrations, seed demo data, initialize vector DB. Shutdown: dispose engine."""
     logger.info("Running database migrations...")
     await run_migrations()
     logger.info("Migrations complete.")
@@ -33,6 +34,11 @@ async def lifespan(app: FastAPI):
     # Seed demo operators if needed
     async with async_session_factory() as db:
         await seed_database(db)
+
+    # Initialize Qdrant and operational plant manuals
+    logger.info("Initializing vector retrieval service and operational manuals...")
+    retrieval_service.initialize()
+    logger.info("Vector retrieval service ready.")
 
     yield
 
@@ -43,13 +49,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sovereign Workbench API",
     description=(
-        "Phase 0/1 backend for the Sovereign On-Premise Agentic AI "
-        "Workbench. Provides authentication, RBAC, rate limiting, and "
-        "a hash-chained audit trail. Pipeline stubs for Phases 2-5."
+        "Sovereign On-Premise Agentic AI Workbench backend. "
+        "Provides authentication, RBAC, rate limiting, PromptGuard input screening, "
+        "RBAC-filtered Qdrant vector retrieval, and a SHA-256 hash-chained audit trail."
     ),
-    version="0.1.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
+
 
 # ── CORS (permissive for dev — lock down in production) ───────
 app.add_middleware(

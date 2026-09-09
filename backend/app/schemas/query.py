@@ -1,5 +1,5 @@
 """
-Query request/response schemas — pipeline is stubbed for Phase 1.
+Query request/response schemas for the defense pipeline.
 """
 
 from pydantic import BaseModel, Field
@@ -10,6 +10,17 @@ class QueryRequest(BaseModel):
     has_image: bool = False
 
 
+class RetrievedChunk(BaseModel):
+    id: str
+    unit: str
+    sop_id: str
+    title: str
+    content: str
+    min_clearance: int
+    score: float
+
+
 class QueryResponse(BaseModel):
     status: str
     note: str
+    retrieved_chunks: list[RetrievedChunk] = []

@@ -18,7 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.schemas.query import QueryRequest, QueryResponse
-from app.services import audit_service, prompt_guard, rate_limiter, rbac_service
+from app.services import (
+    audit_service,
+    prompt_guard,
+    rate_limiter,
+    rbac_service,
+    retrieval_service,
+)
+
 
 router = APIRouter(tags=["Query"])
 
@@ -103,7 +110,12 @@ async def submit_query(
             },
         )
 
-    # ── Step 4: Query accepted (stubbed) ──────────────────────
+    # ── Step 4: Document Retrieval & Query Acceptance ────────
+    retrieved_chunks = retrieval_service.retrieve(
+        query=body.text,
+        operator_clearance=clearance,
+    )
+
     async with audit_service.audit_transaction():
         await audit_service.append_entry(
             db=db,
@@ -112,11 +124,34 @@ async def submit_query(
             actor_user_id=user_id,
         )
 
-        # Stub response — retrieval/calculation/vision are Phases 3-5
+        # Audit retrieval chunks accessed with security clearance ratings
+        if retrieved_chunks:
+            chunk_summary = ", ".join(
+                f"[{c.sop_id} {c.unit} L{c.min_clearance}]"
+                for c in retrieved_chunks
+            )
+            audit_detail = (
+                f"Retrieved {len(retrieved_chunks)} chunks for clearance {clearance}: "
+                f"{chunk_summary}"
+            )
+        else:
+            audit_detail = f"Zero document chunks accessible for clearance {clearance}"
+
+        await audit_service.append_entry(
+            db=db,
+            event_type="RETRIEVAL_CHUNKS_ACCESSED",
+            detail=audit_detail,
+            actor_user_id=user_id,
+        )
+
+        # Query complete (vision/calculation are Phases 4-5)
         await audit_service.append_entry(
             db=db,
             event_type="QUERY_COMPLETE",
-            detail="Stub response returned — retrieval/calculation not yet implemented",
+            detail=(
+                f"Query processed with {len(retrieved_chunks)} retrieved chunks — "
+                "vision/calculation to be integrated in Phases 4-5"
+            ),
             actor_user_id=user_id,
         )
 
@@ -125,7 +160,9 @@ async def submit_query(
     return QueryResponse(
         status="accepted_stub",
         note=(
-            "Retrieval/calculation not yet implemented — "
-            "Phase 2 verifies rate-limit + PromptGuard + RBAC + audit"
+            f"Retrieved {len(retrieved_chunks)} role-filtered manual chunks — "
+            "vision/calculation to be integrated in Phases 4-5"
         ),
+        retrieved_chunks=retrieved_chunks,
     )
+

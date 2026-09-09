@@ -34,9 +34,10 @@ This repository is being built across 8 deliberate engineering phases:
 
 - [x] **Phase 0 — Environment & Repo Foundation**: FastAPI project skeleton, configuration management, automated health check endpoints (`/health`).
 - [x] **Phase 1 — Real Auth, RBAC & Server-Side Audit Trail**: Argon2id password hashing, stateless JWT issuance with `role` + `clearance_level`, deterministic plant capability map (L1/L2/L3 equipment checks), per-user token-bucket rate limiter, Alembic database migrations, and concurrency-locked SHA-256 hash-chained audit ledger (`/auth`, `/query`, `/audit`). Fully verified via automated test suites.
-- [ ] **Phase 2 — Prompt Guard (Llama-Guard-3)**: Input safety screening layer situated ahead of RBAC (Step 2) to block and audit prompt injections and adversarial attacks. *(Active Phase)*
-- [ ] **Phase 3 — Real Document Retrieval ("Iron Vault")**: Qdrant vector database with local embedding model, clearance-tagged manual chunks, and query-time pre-filtering (`clearance_level <= user_level`).
-- [ ] **Phase 4 — Vision & Sandboxed Calculation**: Local Qwen2.5-VL gauge-reading extraction from photos and isolated container sandbox for deterministic $\Delta p$ pressure drop calculation.
+- [x] **Phase 2 — Prompt Guard (Llama-Guard-3)**: Input safety screening layer situated ahead of RBAC (Step 2) with dual-engine deterministic OT injection scanner and local Llama-Guard-3 client to block and audit adversarial prompt injections. Fully verified.
+- [x] **Phase 3 — Real Document Retrieval ("Iron Vault")**: Qdrant vector database with on-premise FastEmbed local embeddings (`BAAI/bge-small-en-v1.5`), clearance-tagged plant SOP manual chunks, zero-leakage vector pre-filtering (`min_clearance <= user_clearance`), and `RETRIEVAL_CHUNKS_ACCESSED` audit logging. Fully verified.
+- [ ] **Phase 4 — Vision & Sandboxed Calculation**: Local Qwen2.5-VL gauge-reading extraction from photos and isolated container sandbox for deterministic $\Delta p$ pressure drop calculation. *(Active Phase)*
+
 - [ ] **Phase 5 — Planner & Orchestration**: LangGraph + Qwen 2.5 local reasoning loop with static capability-map allowlist guardrails and `interrupt()` execution for sensitive actions.
 - [ ] **Phase 6 — HITL Streaming & Frontend Rewiring**: Server-Sent Events (`/query/{id}/stream`), human authorization decision endpoints (`/approvals/{id}/decision`), and rewiring `script.js` from client-side `setTimeout` simulation to real backend SSE events.
 - [ ] **Phase 7 — Comprehensive Security Review & E2E Validation**: Input validation, photo upload safety, dependency audit, and automated end-to-end integration tests.

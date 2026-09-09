@@ -19,17 +19,19 @@ if os.path.exists(_db_path):
 
 _normalized_path = _db_path.replace("\\", "/")
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_normalized_path}"
+os.environ["QDRANT_STORAGE_PATH"] = ":memory:"
 
 # 2. Now import app db modules with the test DATABASE_URL active
 from app.db.seed import seed_database
 from app.db.session import Base, async_session_factory, engine
+from app.services import retrieval_service
 
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
     """
-    Session-scoped autouse fixture that initializes tables and seeds demo data
-    once for the entire test session, then cleans up the temp file on teardown.
+    Session-scoped autouse fixture that initializes tables, seeds demo data,
+    and initializes in-memory vector retrieval for the test session.
     """
     async def _init_db():
         async with engine.begin() as conn:
@@ -38,6 +40,8 @@ def setup_test_db():
             await seed_database(db)
 
     asyncio.run(_init_db())
+    retrieval_service.initialize()
+
 
     yield
 
