@@ -17,16 +17,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.db.session import get_db
-from app.schemas.query import QueryRequest, QueryResponse
+from app.schemas.query import HITLApprovalDetails, QueryRequest, QueryResponse
 from app.services import (
     audit_service,
     calculation_service,
+    planner_service,
     prompt_guard,
     rate_limiter,
     rbac_service,
     retrieval_service,
     vision_service,
 )
+
 
 
 
@@ -152,6 +154,22 @@ async def submit_query(
             equipment_unit=unit,
         )
 
+    # ── Step 7: LangGraph Reasoning Loop & HITL Interruption ─
+    plan_result = planner_service.run_plan(
+        query=body.text,
+        user_id=str(user_id),
+        operator_email=current_user.get("email", ""),
+        clearance_level=clearance,
+        unit=unit,
+        retrieved_docs=[c.model_dump() for c in retrieved_chunks],
+        vision_reading=vision_result.reading if vision_result else None,
+        pressure_drop=calc_result.pressure_drop if calc_result else None,
+    )
+
+    is_awaiting_approval = bool(plan_result.get("approval_required"))
+    thread_id = plan_result.get("thread_id")
+    approval_details_dict = plan_result.get("approval_details")
+
     async with audit_service.audit_transaction():
         await audit_service.append_entry(
             db=db,
@@ -206,30 +224,72 @@ async def submit_query(
                 actor_user_id=user_id,
             )
 
+        # Step 7 Audit: Plan and HITL gate
+        if is_awaiting_approval and approval_details_dict:
+            await audit_service.append_entry(
+                db=db,
+                event_type="HITL_REQUIRED",
+                detail=(
+                    f"Sensitive action '{approval_details_dict['action']}' on target "
+                    f"'{approval_details_dict['target']}' requires operator authorization. "
+                    f"LangGraph thread {thread_id} paused at HITL gate."
+                ),
+                actor_user_id=user_id,
+            )
+        else:
+            await audit_service.append_entry(
+                db=db,
+                event_type="PLAN_GENERATED",
+                detail=(
+                    f"Reasoning loop executed for {unit}: "
+                    f"{plan_result.get('action_status', 'COMPLETED')}"
+                ),
+                actor_user_id=user_id,
+            )
+
         # Query complete
+        complete_status = "Awaiting HITL Authorization" if is_awaiting_approval else "Completed"
         await audit_service.append_entry(
             db=db,
             event_type="QUERY_COMPLETE",
             detail=(
-                f"Query defense pipeline verified: {len(retrieved_chunks)} docs retrieved"
+                f"Query defense pipeline verified ({complete_status}): {len(retrieved_chunks)} docs retrieved"
                 + (f", gauge: {vision_result.reading} bar" if vision_result else "")
-                + (f", delta-p: {calc_result.pressure_drop} bar ({calc_result.status})" if calc_result else "")
+                + (f", delta-p: {calc_result.pressure_drop} bar" if calc_result else "")
             ),
             actor_user_id=user_id,
         )
 
         await db.commit()
 
-    return QueryResponse(
-        status="accepted_stub",
-        note=(
+    approval_details_obj = (
+        HITLApprovalDetails(**approval_details_dict)
+        if approval_details_dict
+        else None
+    )
+
+    response_status = "awaiting_approval" if is_awaiting_approval else "accepted_stub"
+    response_note = (
+        "Sensitive actuator action proposed — workflow paused at HITL gate"
+        if is_awaiting_approval
+        else (
             f"Retrieved {len(retrieved_chunks)} role-filtered manual chunks"
             + (f", vision reading: {vision_result.reading} bar" if vision_result else "")
             + (f", calculated delta-p: {calc_result.pressure_drop} bar ({calc_result.status})" if calc_result else "")
-        ),
+        )
+    )
+
+    return QueryResponse(
+        status=response_status,
+        note=response_note,
         retrieved_chunks=retrieved_chunks,
         vision_analysis=vision_result,
         calculation_result=calc_result,
+        approval_required=is_awaiting_approval,
+        approval_details=approval_details_obj,
+        thread_id=thread_id,
+        final_synthesis=plan_result.get("synthesis"),
     )
+
 
 

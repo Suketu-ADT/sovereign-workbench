@@ -210,6 +210,69 @@ def run_tests():
 
 
 
+    # 22. Phase 5 - LangGraph Orchestration & HITL Interruption on Sensitive Actuator Command
+    r = client.post(
+        "/query",
+        json={
+            "text": "Fetch boiler-102 log and open release valve to relieve pressure",
+            "has_image": False,
+        },
+        headers=headers_john,
+    )
+    hitl_res = r.json()
+    thread_id = hitl_res.get("thread_id")
+    approval_det = hitl_res.get("approval_details")
+    record(
+        r.status_code == 200
+        and hitl_res.get("status") == "awaiting_approval"
+        and hitl_res.get("approval_required") is True
+        and thread_id is not None
+        and approval_det is not None
+        and approval_det.get("action") == "open_release_valve",
+        f"Phase 5 LangGraph HITL Interruption: 200 OK (status={hitl_res.get('status')}, action={approval_det.get('action') if approval_det else None}, thread_id={thread_id})"
+    )
+
+    # 23. Phase 5 - Pending Approvals Endpoint
+    r = client.get("/approvals/pending", headers=headers_suketu)
+    pending_list = r.json().get("pending_approvals", [])
+    found_pending = any(p.get("thread_id") == thread_id for p in pending_list)
+    record(
+        r.status_code == 200 and found_pending,
+        f"GET /approvals/pending: 200 OK (found thread {thread_id} in {len(pending_list)} pending approval items)"
+    )
+
+    # 24. Phase 5 - Operator Decision (Approve Action & Resume Execution)
+    r = client.post(
+        f"/approvals/{thread_id}/decision",
+        json={"decision": "approve", "comment": "Approved by Chief Auditor Suketu Patel for test"},
+        headers=headers_suketu,
+    )
+    decision_res = r.json()
+    record(
+        r.status_code == 200
+        and decision_res.get("status") == "APPROVED_AND_EXECUTED"
+        and decision_res.get("action") == "open_release_valve",
+        f"POST /approvals/{thread_id}/decision (Approve): 200 OK (status={decision_res.get('status')}, action={decision_res.get('action')}, audit_hash={decision_res.get('audit_hash', '')[:16]}...)"
+    )
+
+    # 25. Audit Log - List Entries (Verify HITL_REQUIRED & HITL_APPROVAL Events)
+    r = client.get("/audit?limit=40", headers=headers_suketu)
+    entries = r.json().get("entries", [])
+    hitl_req_logs = [e for e in entries if e.get("event") == "HITL_REQUIRED"]
+    hitl_app_logs = [e for e in entries if e.get("event") == "HITL_APPROVAL"]
+    record(
+        r.status_code == 200 and len(hitl_req_logs) > 0 and len(hitl_app_logs) > 0,
+        f"GET /audit (HITL Audit Events): 200 OK (found {len(hitl_req_logs)} HITL_REQUIRED, {len(hitl_app_logs)} HITL_APPROVAL)"
+    )
+
+    # 26. Audit Log - Verify Cryptographic Chain Integrity Post-HITL
+    r = client.get("/audit/verify", headers=headers_suketu)
+    verify_data = r.json()
+    record(
+        r.status_code == 200 and verify_data.get("valid") is True and verify_data.get("broken_at_index") is None,
+        f"GET /audit/verify (Post-Phase 5): 200 OK, valid={verify_data.get('valid')}, entries_checked={verify_data.get('entries_checked')}"
+    )
+
     print("=" * 60)
     total = len(results)
     passed = results.count(True)
@@ -222,3 +285,4 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
+

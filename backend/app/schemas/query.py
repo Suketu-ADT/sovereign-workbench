@@ -41,9 +41,37 @@ class CalculationResult(BaseModel):
     recommended_action: str | None = None
 
 
+class HITLApprovalDetails(BaseModel):
+    action: str
+    target: str
+    requestor: str
+    context: str
+    authority: str
+    thread_id: str
+
+
+class HITLDecisionRequest(BaseModel):
+    decision: str  # "approve" or "reject"
+    comment: str | None = None
+
+
+class HITLDecisionResponse(BaseModel):
+    thread_id: str
+    status: str  # "APPROVED_AND_EXECUTED" or "REJECTED"
+    action: str
+    target: str
+    operator_email: str
+    audit_hash: str | None = None
+    note: str
+
+
 class QueryResponse(BaseModel):
     status: str
     note: str
     retrieved_chunks: list[RetrievedChunk] = []
     vision_analysis: VisionResult | None = None
     calculation_result: CalculationResult | None = None
+    approval_required: bool = False
+    approval_details: HITLApprovalDetails | None = None
+    thread_id: str | None = None
+    final_synthesis: str | None = None

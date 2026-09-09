@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import audit, auth, query
+from app.api import approvals, audit, auth, query
 from app.db.migrate import run_migrations
 from app.db.seed import seed_database
 from app.db.session import async_session_factory, engine
@@ -71,6 +71,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(query.router)
 app.include_router(audit.router)
+app.include_router(approvals.router)
+
 
 
 # ── Health check ──────────────────────────────────────────────

@@ -46,7 +46,14 @@ class Settings(BaseSettings):
     VISION_MODEL_NAME: str = "qwen2.5-vl:7b"
     VISION_TIMEOUT: float = 5.0
 
+    # ── LangGraph Planner & Reasoning (Qwen2.5) ───────────────
+    PLANNER_MODEL_ENABLED: bool = True
+    PLANNER_MODEL_URL: str = "http://127.0.0.1:11434"
+    PLANNER_MODEL_NAME: str = "qwen2.5:7b"
+    PLANNER_TIMEOUT: float = 5.0
+
 
 settings = Settings()
+
 
 
