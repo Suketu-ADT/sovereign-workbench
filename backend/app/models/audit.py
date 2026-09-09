@@ -21,7 +21,7 @@ class AuditEntry(Base):
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True
     )
-    idx: Mapped[int] = mapped_column(Integer, nullable=False)
+    idx: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

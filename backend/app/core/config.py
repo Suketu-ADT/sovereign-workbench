@@ -27,5 +27,11 @@ class Settings(BaseSettings):
     # ── Seed ──────────────────────────────────────────────────
     SEED_PASSWORD: str = "changeme123"
 
+    # ── Prompt Guard (Llama-Guard-3) ──────────────────────────
+    PROMPT_GUARD_ENABLED: bool = True
+    PROMPT_GUARD_URL: str = "http://127.0.0.1:11434"
+    PROMPT_GUARD_MODEL: str = "llama-guard3:1b"
+    PROMPT_GUARD_TIMEOUT: float = 3.0
+
 
 settings = Settings()

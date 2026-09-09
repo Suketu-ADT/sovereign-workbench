@@ -12,8 +12,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import audit, auth, query
+from app.db.migrate import run_migrations
 from app.db.seed import seed_database
-from app.db.session import Base, async_session_factory, engine
+from app.db.session import async_session_factory, engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,11 +25,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: create tables and seed demo data. Shutdown: dispose engine."""
-    logger.info("Creating database tables...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Tables ready.")
+    """Startup: run migrations and seed demo data. Shutdown: dispose engine."""
+    logger.info("Running database migrations...")
+    await run_migrations()
+    logger.info("Migrations complete.")
 
     # Seed demo operators if needed
     async with async_session_factory() as db:

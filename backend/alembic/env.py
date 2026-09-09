@@ -18,8 +18,8 @@ from app.models.audit import AuditEntry  # noqa: F401
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+if config.config_file_name is not None and config.attributes.get("connection") is None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
@@ -60,7 +60,11 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    asyncio.run(run_async_migrations())
+    connectable = config.attributes.get("connection", None)
+    if connectable is not None:
+        do_run_migrations(connectable)
+    else:
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

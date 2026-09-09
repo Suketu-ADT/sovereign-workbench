@@ -1,20 +1,20 @@
-﻿# 🛡️ Sovereign Workbench — On-Premise Agentic AI Console
+# 🛡️ Sovereign Workbench — On-Premise Agentic AI Console
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Security-IEC%2062443%20Compliant-0E7C86?style=for-the-badge&logo=shield" alt="IEC 62443" />
-  <img src="https://img.shields.io/badge/Architecture-Air--Gapped%20%2F%20Zero%20Egress-1A7F37?style=for-the-badge&logo=server" alt="Air-Gapped" />
-  <img src="https://img.shields.io/badge/Stack-Pure%20HTML%2FCSS%2FJS-black?style=for-the-badge&logo=html5" alt="Pure Vanilla" />
-  <img src="https://img.shields.io/badge/Build%20Step-Zero%20Dependencies-brightgreen?style=for-the-badge" alt="Zero Dependencies" />
-  <img src="https://img.shields.io/badge/Audit-SHA--256%20Hash%20Chain-blue?style=for-the-badge&logo=git" alt="SHA-256 Audit" />
+  <img src="https://img.shields.io/badge/Security_Standard-IEC_62443_Alignment-0E7C86?style=for-the-badge&logo=shield" alt="IEC 62443 Alignment" />
+  <img src="https://img.shields.io/badge/Target_Architecture-Air--Gapped_%2F_Zero_Egress-1A7F37?style=for-the-badge&logo=server" alt="Target Air-Gapped" />
+  <img src="https://img.shields.io/badge/Status-Phase_0%2F1_Verified-blue?style=for-the-badge&logo=fastapi" alt="Phase 0/1 Verified" />
+  <img src="https://img.shields.io/badge/Audit-SHA--256_Hash_Chain-2ea44f?style=for-the-badge&logo=git" alt="SHA-256 Audit" />
 </p>
 
 > **Confidential Industrial Operations & Multimodal Safety Workbench**  
-> An air-gapped, defense-in-depth operator console built for high-consequence operational technology (OT) environments (thermal power generation, chemical loops, and automated manufacturing). Enables maintenance operators to query technical manuals, analyze visual gauge telemetry, perform deterministic thermodynamic calculations, and trigger physical actuators under strict Human-in-the-Loop (HITL) authorization and cryptographic tamper-proof logging.
+> An on-premise, defense-in-depth operator console and backend prototype being engineered for high-consequence operational technology (OT) environments (thermal power generation, chemical loops, and automated manufacturing). Enables maintenance operators to query technical manuals, analyze visual gauge telemetry, perform deterministic thermodynamic calculations, and trigger physical actuators under strict Human-in-the-Loop (HITL) authorization and cryptographic tamper-proof logging.
 
 ---
 
 ## 📑 Table of Contents
 
+- [Phased Implementation Roadmap & Current Status](#-phased-implementation-roadmap--current-status)
 - [Problem Statement & Background](#-problem-statement--background)
 - [Key Architectural Features](#-key-architectural-features)
 - [Visible 8-Stage Defense Pipeline](#-visible-8-stage-defense-pipeline)
@@ -24,7 +24,23 @@
 - [Quick Start Guide](#-quick-start-guide)
 - [Interactive Demo Scenarios](#-interactive-demo-scenarios)
 - [Cryptographic Audit Hash Chain](#-cryptographic-audit-hash-chain)
-- [Compliance & Standards](#-compliance--standards)
+- [Security Standards & Design Alignment](#-security-standards--design-alignment)
+
+---
+
+## 🚦 Phased Implementation Roadmap & Current Status
+
+This repository is being built across 8 deliberate engineering phases:
+
+- [x] **Phase 0 — Environment & Repo Foundation**: FastAPI project skeleton, configuration management, automated health check endpoints (`/health`).
+- [x] **Phase 1 — Real Auth, RBAC & Server-Side Audit Trail**: Argon2id password hashing, stateless JWT issuance with `role` + `clearance_level`, deterministic plant capability map (L1/L2/L3 equipment checks), per-user token-bucket rate limiter, Alembic database migrations, and concurrency-locked SHA-256 hash-chained audit ledger (`/auth`, `/query`, `/audit`). Fully verified via automated test suites.
+- [ ] **Phase 2 — Prompt Guard (Llama-Guard-3)**: Input safety screening layer situated ahead of RBAC (Step 2) to block and audit prompt injections and adversarial attacks. *(Active Phase)*
+- [ ] **Phase 3 — Real Document Retrieval ("Iron Vault")**: Qdrant vector database with local embedding model, clearance-tagged manual chunks, and query-time pre-filtering (`clearance_level <= user_level`).
+- [ ] **Phase 4 — Vision & Sandboxed Calculation**: Local Qwen2.5-VL gauge-reading extraction from photos and isolated container sandbox for deterministic $\Delta p$ pressure drop calculation.
+- [ ] **Phase 5 — Planner & Orchestration**: LangGraph + Qwen 2.5 local reasoning loop with static capability-map allowlist guardrails and `interrupt()` execution for sensitive actions.
+- [ ] **Phase 6 — HITL Streaming & Frontend Rewiring**: Server-Sent Events (`/query/{id}/stream`), human authorization decision endpoints (`/approvals/{id}/decision`), and rewiring `script.js` from client-side `setTimeout` simulation to real backend SSE events.
+- [ ] **Phase 7 — Comprehensive Security Review & E2E Validation**: Input validation, photo upload safety, dependency audit, and automated end-to-end integration tests.
+- [ ] **Phase 8 — Final Deployment & Production Verification**: Multi-container Docker Compose deployment on dedicated GPU hardware and verified operational checklist.
 
 ---
 
@@ -158,6 +174,16 @@ npx serve .
 ```
 Navigate to `http://localhost:8080`.
 
+> [!NOTE]
+> **Frontend Runtime Architecture**: The frontend console currently runs in interactive visual demo mode using client-side `setTimeout` simulations. The verified Phase 0/1 FastAPI backend is located under [`backend/`](file:///c:/Users/Arpit%20singh/OneDrive/Desktop/SIH/backend). In **Phase 6**, `script.js` will undergo a data-source swap to listen directly to real pipeline Server-Sent Events (SSE).
+
+### Option 3: Run the FastAPI Backend (Phase 0/1)
+```bash
+cd backend
+python -m uvicorn app.main:app --port 8000
+```
+Interactive Swagger UI documentation is available at **`http://localhost:8000/docs`**.
+
 ---
 
 ## 🧪 Interactive Demo Scenarios
@@ -211,11 +237,13 @@ The entire chain can be exported as a verified JSON ledger anytime by opening th
 
 ---
 
-## 📜 Compliance & Standards
+## 📜 Security Standards & Design Alignment
 
-- **IEC 62443-3-3**: Meets System Security Requirements for Industrial Automation and Control Systems (IACS).
-- **ISO/IEC 27001**: Implements strict boundary access control and tamper-evident event logging.
-- **NIST SP 800-82**: Guide to Operational Technology (OT) Security.
+The Sovereign Workbench architecture is engineered to align with critical infrastructure cybersecurity frameworks:
+
+- **IEC 62443-3-3 Architecture Alignment**: Designed to fulfill technical security requirements for Industrial Automation and Control Systems (IACS) through defense-in-depth pipeline stages, strict separation of duties, and non-repudiable audit logs.
+- **ISO/IEC 27001 Controls Alignment**: Implements least-privilege boundary access control (RBAC Levels 1–3) and append-only cryptographic event logging.
+- **NIST SP 800-82 Alignment**: Follows Guide to Operational Technology (OT) Security principles for air-gapped network segmentation, physical actuator isolation, and mandatory human-in-the-loop (HITL) authorization for critical commands.
 
 ---
 

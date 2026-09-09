@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import hash_password
 from app.models.user import User
-from app.services.audit_service import append_entry
+from app.services.audit_service import append_entry, audit_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +80,12 @@ async def seed_database(db: AsyncSession) -> None:
     await db.flush()
 
     # Genesis audit entry
-    await append_entry(
-        db=db,
-        event_type="GENESIS",
-        detail="Sovereign Workbench audit chain initialized",
-        actor_user_id=None,
-    )
-
-    await db.commit()
+    async with audit_transaction():
+        await append_entry(
+            db=db,
+            event_type="GENESIS",
+            detail="Sovereign Workbench audit chain initialized",
+            actor_user_id=None,
+        )
+        await db.commit()
     logger.info("Database seeded successfully with %d operators.", len(SEED_OPERATORS))

@@ -14,9 +14,11 @@ Where canonical_json uses sorted keys and no whitespace for
 reproducible verification.
 """
 
+import asyncio
 import hashlib
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -26,6 +28,18 @@ from app.models.audit import AuditEntry
 
 # 64 zero characters — the genesis entry's prev_hash
 GENESIS_PREV_HASH = "0" * 64
+
+_chain_lock = asyncio.Lock()
+
+
+@asynccontextmanager
+async def audit_transaction():
+    """
+    Async context manager that serializes hash-chain updates across the entire
+    select -> compute -> insert -> commit sequence to prevent chain forks.
+    """
+    async with _chain_lock:
+        yield
 
 
 def _canonical_json(data: dict) -> str:
@@ -66,6 +80,11 @@ async def append_entry(
     Reads the current head of the chain, computes the next hash,
     and inserts the new entry — all within the caller's transaction.
     """
+    if not _chain_lock.locked():
+        raise RuntimeError(
+            "append_entry() must be called within an audit_transaction() context"
+        )
+
     # Get the latest entry to chain from
     result = await db.execute(
         select(AuditEntry).order_by(AuditEntry.idx.desc()).limit(1)
