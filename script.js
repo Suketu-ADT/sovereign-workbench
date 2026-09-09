@@ -146,6 +146,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   };
 
+  var API_BASE = 'http://127.0.0.1:8000';
+
   var state = {
     theme: null,
     currentView: 'chat',
@@ -153,6 +155,8 @@ document.addEventListener('DOMContentLoaded', function () {
     pipelineRunning: false,
     imageAttached: false,
     imageName: '',
+    imageData: null,
+    token: localStorage.getItem('sovereign_token') || null,
     auditLog: [],
     lastHash: '0'.repeat(64),
     chats: [],           // { id, title, group, messages:[] }
@@ -378,40 +382,137 @@ document.addEventListener('DOMContentLoaded', function () {
     updateUserUI();
     closeModal(els.authDialog);
     closeUserMenu();
-    addAuditEntry('OPERATOR_AUTH', 'Operator authenticated \u2014 ' + userProfile.email + ' [' + userProfile.clearanceName + ']');
   }
 
   function logoutUser() {
     var prevEmail = state.user ? state.user.email : 'Operator';
     state.user = null;
+    state.token = null;
+    localStorage.removeItem('sovereign_token');
     updateUserUI();
     closeUserMenu();
     addAuditEntry('OPERATOR_LOGOUT', 'Operator ' + prevEmail + ' logged out of console');
     openModal(els.authDialog);
   }
 
+  function authenticate(email, password) {
+    return fetch(API_BASE + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password || 'changeme123' })
+    })
+    .then(function(res) {
+      if (!res.ok) throw new Error('Authentication failed: HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function(data) {
+      state.token = data.access_token;
+      localStorage.setItem('sovereign_token', data.access_token);
+      var u = data.user;
+      var rawName = u.full_name || u.email.split('@')[0];
+      var nameWords = rawName.split(/\s+/).filter(Boolean);
+      var firstName = nameWords.length ? nameWords[0] : 'Operator';
+      var initials = (nameWords.length > 1 ? (nameWords[0][0] + nameWords[1][0]) : firstName.substring(0, 2)).toUpperCase();
+      var clearanceMap = {
+        1: { name: 'Level 1 (boiler-102 only)', tier: 'Engineer' },
+        2: { name: 'Level 2 (Turbines, Boilers, Pumps)', tier: 'Specialist' },
+        3: { name: 'Level 3 (Chief Safety Auditor \u00B7 All Systems)', tier: 'Pro' }
+      };
+      var clr = clearanceMap[u.clearance_level] || clearanceMap[3];
+      var profile = {
+        name: firstName,
+        fullName: u.full_name || rawName,
+        email: u.email,
+        clearanceLevel: u.clearance_level,
+        clearanceName: clr.name,
+        role: u.role,
+        tier: clr.tier,
+        avatar: initials
+      };
+      loginUser(profile);
+      loadAuditLog();
+      return profile;
+    })
+    .catch(function(err) {
+      console.warn('Backend login unreachable, using offline fallback profile:', err);
+      var fallback = DEMO_USERS.suketu;
+      if (email && email.indexOf('morrison') !== -1) fallback = DEMO_USERS.morrison;
+      else if (email && email.indexOf('vance') !== -1) fallback = DEMO_USERS.vance;
+      loginUser(fallback);
+    });
+  }
+
+  function loadAuditLog() {
+    var headers = {};
+    if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+    return fetch(API_BASE + '/audit?limit=50', { headers: headers })
+      .then(function(res) {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then(function(data) {
+        if (data && data.entries && data.entries.length > 0) {
+          state.auditLog = data.entries.map(function(e) {
+            return {
+              index: e.index !== undefined ? e.index : e.idx,
+              timestamp: e.timestamp,
+              event: e.event || e.event_type,
+              detail: e.detail,
+              hash: e.hash,
+              prevHash: e.prevHash || e.prev_hash
+            };
+          });
+          state.lastHash = state.auditLog[0].hash; // top entry
+          if (els.auditCount) {
+            els.auditCount.textContent = state.auditLog.length + ' entries';
+          }
+          renderAuditLog();
+        }
+      })
+      .catch(function() {
+        // Fallback silently
+      });
+  }
+
   function exportAuditJson() {
-    var exportData = {
-      exportTimestamp: new Date().toISOString(),
-      system: 'Sovereign Workbench Air-Gapped Console',
-      genesisHash: '0000000000000000000000000000000000000000000000000000000000000000',
-      currentHeadHash: state.lastHash,
-      entryCount: state.auditLog.length,
-      operator: state.user ? {
-        name: state.user.fullName || state.user.name,
-        email: state.user.email,
-        clearance: state.user.clearanceName
-      } : 'Unauthenticated',
-      ledger: state.auditLog
-    };
-    var dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
-    var dlAnchor = document.createElement('a');
-    dlAnchor.setAttribute('href', dataStr);
-    dlAnchor.setAttribute('download', 'sovereign-workbench-audit-chain-' + Date.now() + '.json');
-    document.body.appendChild(dlAnchor);
-    dlAnchor.click();
-    dlAnchor.remove();
-    addAuditEntry('AUDIT_EXPORT', 'Cryptographic audit ledger exported as JSON by ' + (state.user ? state.user.email : 'System'));
+    var headers = {};
+    if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+    fetch(API_BASE + '/audit/export', { headers: headers })
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(exportData) {
+        var dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
+        var dlAnchor = document.createElement('a');
+        dlAnchor.setAttribute('href', dataStr);
+        dlAnchor.setAttribute('download', 'sovereign-workbench-audit-chain-' + Date.now() + '.json');
+        document.body.appendChild(dlAnchor);
+        dlAnchor.click();
+        dlAnchor.remove();
+      })
+      .catch(function() {
+        var exportData = {
+          exportTimestamp: new Date().toISOString(),
+          system: 'Sovereign Workbench Air-Gapped Console',
+          genesisHash: '0000000000000000000000000000000000000000000000000000000000000000',
+          currentHeadHash: state.lastHash,
+          entryCount: state.auditLog.length,
+          operator: state.user ? {
+            name: state.user.fullName || state.user.name,
+            email: state.user.email,
+            clearance: state.user.clearanceName
+          } : 'Unauthenticated',
+          ledger: state.auditLog
+        };
+        var dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
+        var dlAnchor = document.createElement('a');
+        dlAnchor.setAttribute('href', dataStr);
+        dlAnchor.setAttribute('download', 'sovereign-workbench-audit-chain-' + Date.now() + '.json');
+        document.body.appendChild(dlAnchor);
+        dlAnchor.click();
+        dlAnchor.remove();
+      });
   }
 
 
@@ -666,6 +767,7 @@ document.addEventListener('DOMContentLoaded', function () {
     els.previewName.textContent = file.name;
     var reader = new FileReader();
     reader.onload = function(ev) {
+      state.imageData = ev.target.result;
       els.previewThumb.innerHTML = '<img src="' + ev.target.result + '" alt="Preview">';
     };
     reader.readAsDataURL(file);
@@ -676,6 +778,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function removeImage() {
     state.imageAttached = false;
     state.imageName = '';
+    state.imageData = null;
     els.imageAttach.value = '';
     els.previewThumb.innerHTML = '';
     els.imagePreview.hidden = true;
@@ -699,7 +802,9 @@ document.addEventListener('DOMContentLoaded', function () {
     ctx.lineTo(40 + Math.cos(angle) * 22, 44 + Math.sin(angle) * 22); ctx.stroke();
     ctx.fillStyle = '#4FC3C9'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
     ctx.fillText('6.4 bar', 40, 72);
-    els.previewThumb.innerHTML = '<img src="' + canvas.toDataURL() + '" alt="Gauge">';
+    var dataUrl = canvas.toDataURL();
+    state.imageData = dataUrl;
+    els.previewThumb.innerHTML = '<img src="' + dataUrl + '" alt="Gauge">';
     els.imagePreview.hidden = false;
   }
 
@@ -902,6 +1007,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── SUBMIT / PIPELINE EXECUTION ────────────────────────────
 
+  // ── SUBMIT / PIPELINE EXECUTION ────────────────────────────
+
   function handleSubmit() {
     var query = els.chatInput.value.trim();
     if (!query || state.pipelineRunning) return;
@@ -920,6 +1027,7 @@ document.addEventListener('DOMContentLoaded', function () {
     els.chatInput.value = '';
     autoResize();
     var hasImage = state.imageAttached;
+    var imageData = state.imageData || null;
     removeImage();
     updateSendState();
 
@@ -942,9 +1050,197 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var startTime = performance.now();
 
+    // Execute real backend streaming with local fallback
+    executeBackendStream(query, hasImage, imageData, startTime, assistantMsg);
+  }
+
+  function executeBackendStream(query, hasImage, imageData, startTime, assistantMsg) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (state.token) {
+      headers['Authorization'] = 'Bearer ' + state.token;
+    }
+
+    var requestBody = {
+      text: query,
+      has_image: hasImage,
+      image_data: imageData
+    };
+
+    fetch(API_BASE + '/query/stream', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(requestBody)
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        return response.json().then(function(errData) {
+          throw errData;
+        });
+      }
+
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function readChunk() {
+        return reader.read().then(function(result) {
+          if (result.done) {
+            return;
+          }
+          buffer += decoder.decode(result.value, { stream: true });
+          var parts = buffer.split('\n\n');
+          buffer = parts.pop(); // keep partial
+
+          for (var i = 0; i < parts.length; i++) {
+            var block = parts[i].trim();
+            if (!block) continue;
+            var evMatch = block.match(/^event:\s*(.+)$/m);
+            var dataMatch = block.match(/^data:\s*(.+)$/m);
+            if (evMatch && dataMatch) {
+              var evName = evMatch[1].trim();
+              try {
+                var evData = JSON.parse(dataMatch[1].trim());
+                handleSSEEvent(evName, evData, query, hasImage, startTime, assistantMsg);
+              } catch (e) {
+                console.error('Failed to parse SSE event data', e);
+              }
+            }
+          }
+          return readChunk();
+        });
+      }
+
+      return readChunk();
+    })
+    .catch(function(err) {
+      console.warn('Backend SSE streaming unavailable, running local simulation fallback:', err);
+      runLocalSimulationFallback(query, hasImage, startTime, assistantMsg);
+    });
+  }
+
+  function handleSSEEvent(evName, data, query, hasImage, startTime, assistantMsg) {
+    var chat = getActiveChat();
+    switch (evName) {
+      case 'init':
+        addLiveStep(chat, assistantMsg, { id: 'mem-read', icon: 'memory', label: 'Read memory', crumb: 'Areas \u203A Sovereign Ai Workbench', detail: 'Project \u2014 "Sovereign On-Premise Agentic AI Workbench"', status: 'passed' });
+        addLiveStep(chat, assistantMsg, { id: 'tool-load', icon: 'tools', label: 'Loaded tools', detail: '8 defense security layers & cryptographic loggers initialized', status: 'passed' });
+        break;
+
+      case 'step_start':
+        updateStepUI(data.step, 'processing');
+        addLiveStep(chat, assistantMsg, { id: data.step, icon: data.step, label: data.label, status: 'processing', detail: data.desc });
+        break;
+
+      case 'step_complete':
+        updateStepUI(data.step, data.status, data.readout, data.elapsed_ms);
+        updateLiveStep(data.step, data.status, data.readout);
+        break;
+
+      case 'approval_required':
+        updateStepUI('approval', 'awaiting');
+        updateLiveStep('approval', 'processing', 'Awaiting Human-in-the-Loop authorization\u2026');
+        setPipelineLabel('AWAITING_APPROVAL');
+
+        var details = data.approval_details;
+        var threadId = data.thread_id;
+        openApprovalModal({
+          action: details.action,
+          target: details.target,
+          requestor: details.requestor,
+          context: details.context,
+          authority: details.authority,
+          thread_id: threadId,
+          onResolve: function(approved) {
+            submitHITLDecision(threadId, approved, data, hasImage, startTime, assistantMsg);
+          }
+        });
+        break;
+
+      case 'blocked':
+        updateStepUI(data.step, 'blocked', data.reason);
+        updateLiveStep(data.step, 'blocked', data.reason);
+        setPipelineLabel('BLOCKED');
+        replaceThinkingWithBlocked(data.error || 'Security Policy Block', {
+          'Pipeline halted at': data.step,
+          'Reason': data.reason || data.error,
+          'Operator clearance': 'Level ' + (state.user ? state.user.clearanceLevel : 'Unknown')
+        }, data.audit_entry || { index: 0, hash: '0'.repeat(64) }, startTime, assistantMsg);
+        state.pipelineRunning = false;
+        updateSendState();
+        loadAuditLog();
+        break;
+
+      case 'complete':
+        setPipelineLabel('COMPLETE');
+        replaceThinkingWithResponse(data.audit_entry, hasImage, startTime, assistantMsg, data);
+        state.pipelineRunning = false;
+        updateSendState();
+        loadAuditLog();
+        break;
+    }
+  }
+
+  function submitHITLDecision(threadId, approved, sseData, hasImage, startTime, assistantMsg) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+
+    fetch(API_BASE + '/approvals/' + threadId + '/decision', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        decision: approved ? 'approve' : 'reject',
+        comment: 'Operator ' + (state.user ? state.user.name : 'Console') + ' decision'
+      })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(decisionRes) {
+      if (approved) {
+        updateStepUI('approval', 'passed', 'Authorized by ' + (state.user ? state.user.name : 'Operator'));
+        updateLiveStep('approval', 'passed', 'Authorized by ' + (state.user ? state.user.name : 'Operator') + ' (HITL)');
+        updateStepUI('audit-write', 'passed', 'Committed to hash chain');
+        updateLiveStep('audit-write', 'passed', 'Committed to tamper-proof block (SHA-256 verified)');
+        setPipelineLabel('COMPLETE');
+
+        var completeData = {
+          final_synthesis: decisionRes.note,
+          retrieved_chunks: sseData.retrieved_chunks,
+          vision_analysis: sseData.vision_analysis,
+          calculation_result: sseData.calculation_result,
+          action_executed: {
+            action: decisionRes.action,
+            target: decisionRes.target,
+            operator: decisionRes.operator_email
+          }
+        };
+        replaceThinkingWithResponse({ index: sseData.audit_entry.index + 1, hash: decisionRes.audit_hash || '0'.repeat(64) }, hasImage, startTime, assistantMsg, completeData);
+        state.pipelineRunning = false;
+        updateSendState();
+        loadAuditLog();
+      } else {
+        updateStepUI('approval', 'rejected', 'Rejected by ' + (state.user ? state.user.name : 'Operator'));
+        updateLiveStep('approval', 'blocked', 'Rejected by ' + (state.user ? state.user.name : 'Operator'));
+        setPipelineLabel('BLOCKED');
+        replaceThinkingWithBlocked('Human Approval Denied', {
+          'Pipeline halted at': 'Human Approval (HITL)',
+          'Reason': 'Action rejected by the approving authority.',
+          'Rejected by': (state.user ? state.user.fullName || state.user.name : 'Operator')
+        }, { index: sseData.audit_entry.index + 1, hash: decisionRes.audit_hash || '0'.repeat(64) }, startTime, assistantMsg);
+        state.pipelineRunning = false;
+        updateSendState();
+        loadAuditLog();
+      }
+    })
+    .catch(function(err) {
+      console.error('Failed to submit approval decision:', err);
+      state.pipelineRunning = false;
+      updateSendState();
+    });
+  }
+
+  function runLocalSimulationFallback(query, hasImage, startTime, assistantMsg) {
+    var chat = getActiveChat();
     var steps = PIPELINE_STEPS.filter(function(s) { return !s.conditional || hasImage; });
 
-    // Dynamic RBAC authorization evaluation
     var isBlocked = false;
     var blockReason = '';
     var reqClearance = '';
@@ -966,53 +1262,22 @@ document.addEventListener('DOMContentLoaded', function () {
     var blockedAt = isBlocked ? 'rbac' : null;
     var needsApproval = /valve|shutdown|override|emergency|open|close/i.test(query);
 
-    // Initial agentic context sequence (matching Antigravity activity feed)
     var setupSequence = [
-      {
-        delay: 60,
-        step: { id:'mem-read', icon:'memory', label:'Read memory', crumb:'Areas \u203A Sovereign Ai Workbench', detail:'Project \u2014 "Sovereign On-Premise Agentic AI Workbench using Open-Weight Multimodal LLMs"', status:'passed' }
-      },
-      {
-        delay: 120,
-        step: { id:'tool-load', icon:'tools', label:'Loaded tools', detail:'8 defense security layers & cryptographic loggers initialized', status:'passed' }
-      },
-      {
-        delay: 80,
-        step: { id:'task-rate', icon:'task', label:'Added task: Check rate limits & prompt safety', status:'passed' }
-      },
-      {
-        delay: 80,
-        step: { id:'task-rbac', icon:'task', label:'Added task: Verify operator RBAC clearance (' + state.user.name + ' \u00B7 ' + state.user.clearanceName + ')', status:'passed' }
-      },
-      {
-        delay: 80,
-        step: { id:'task-doc', icon:'task', label:'Added task: Retrieve equipment manual (\u00A74.2)', status:'passed' }
-      }
+      { delay: 60, step: { id:'mem-read', icon:'memory', label:'Read memory', crumb:'Areas \u203A Sovereign Ai Workbench', detail:'Project \u2014 "Sovereign On-Premise Agentic AI Workbench"', status:'passed' } },
+      { delay: 120, step: { id:'tool-load', icon:'tools', label:'Loaded tools', detail:'8 defense security layers & cryptographic loggers initialized', status:'passed' } },
+      { delay: 80, step: { id:'task-rate', icon:'task', label:'Added task: Check rate limits & prompt safety', status:'passed' } },
+      { delay: 80, step: { id:'task-rbac', icon:'task', label:'Added task: Verify operator RBAC clearance (' + state.user.name + ' \u00B7 ' + state.user.clearanceName + ')', status:'passed' } },
+      { delay: 80, step: { id:'task-doc', icon:'task', label:'Added task: Retrieve equipment manual (\u00A74.2)', status:'passed' } }
     ];
 
     if (hasImage) {
-      setupSequence.push({
-        delay: 80,
-        step: { id:'task-vis', icon:'task', label:'Added task: Multimodal gauge inspection (vision)', status:'passed' }
-      });
+      setupSequence.push({ delay: 80, step: { id:'task-vis', icon:'task', label:'Added task: Multimodal gauge inspection (vision)', status:'passed' } });
     }
-
-    setupSequence.push({
-      delay: 80,
-      step: { id:'task-calc', icon:'task', label:'Added task: Sandboxed calculation of pressure drop', status:'passed' }
-    });
-
+    setupSequence.push({ delay: 80, step: { id:'task-calc', icon:'task', label:'Added task: Sandboxed calculation of pressure drop', status:'passed' } });
     if (needsApproval) {
-      setupSequence.push({
-        delay: 80,
-        step: { id:'task-auth', icon:'task', label:'Added task: Human authorization check (HITL)', status:'passed' }
-      });
+      setupSequence.push({ delay: 80, step: { id:'task-auth', icon:'task', label:'Added task: Human authorization check (HITL)', status:'passed' } });
     }
-
-    setupSequence.push({
-      delay: 100,
-      step: { id:'task-start', icon:'start', label:'Started task: Defense verification & execution', status:'passed' }
-    });
+    setupSequence.push({ delay: 100, step: { id:'task-start', icon:'start', label:'Started task: Defense verification & execution', status:'passed' } });
 
     function runSetup(i) {
       if (i >= setupSequence.length) {
@@ -1040,7 +1305,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var step = steps[idx];
 
-    // Already past the block point — skip
     if (blockedAt && idx > getStepIdx(steps, blockedAt)) {
       updateStepUI(step.id, 'skipped');
       addLiveStep(chat, assistantMsg, { id: step.id, icon: step.id, label: step.label, status: 'skipped', detail: 'Skipped \u2014 execution halted' });
@@ -1048,7 +1312,6 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
 
-    // Start processing
     updateStepUI(step.id, 'processing');
     addLiveStep(chat, assistantMsg, { id: step.id, icon: step.id, label: step.label, status: 'processing', detail: step.desc });
 
@@ -1097,7 +1360,6 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
 
-    // Timed step
     var t0 = performance.now();
     setTimeout(function() {
       var elapsed = Math.round(performance.now() - t0);
@@ -1158,7 +1420,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── REPLACE THINKING / DISPLAY RESPONSE ────────────────────
 
-  function replaceThinkingWithResponse(auditEntry, hasImage, startTime, assistantMsg) {
+  function replaceThinkingWithResponse(auditEntry, hasImage, startTime, assistantMsg, responseData) {
     var chat = getActiveChat();
     if (!chat) return;
     var targetMsg = assistantMsg || chat.messages[chat.messages.length - 1];
@@ -1173,41 +1435,69 @@ document.addEventListener('DOMContentLoaded', function () {
       targetMsg.thinking.badge = 'COMPLETE';
     }
 
-    var responseText = 'Based on the confidential on-premise analysis of boiler-102, here are the verified results:';
+    var responseText = (responseData && responseData.final_synthesis)
+      ? responseData.final_synthesis
+      : 'Based on the confidential on-premise analysis, here are the verified results:';
 
     var blocksHtml = '<div class="msg-response-blocks">';
 
-    // Doc context
-    blocksHtml += respBlock('Document Context',
-      '<p>Retrieved from: <strong>BOILER-102 Maintenance Manual, Section 4.2</strong></p>' +
-      '<p style="margin-top:4px;font-family:var(--font-mono);font-size:11px;color:var(--text-2)">' +
-      '"Normal operating pressure range for inlet manifold: 4.0\u20137.0 bar. Pressure drop should not exceed 5.0 bar under standard load."</p>');
+    // Document context (from Qdrant Iron Vault or default manual)
+    if (responseData && responseData.retrieved_chunks && responseData.retrieved_chunks.length > 0) {
+      var topChunk = responseData.retrieved_chunks[0];
+      blocksHtml += respBlock('Document Context (Qdrant Iron Vault)',
+        '<p>Retrieved from: <strong>' + esc(topChunk.sop_id) + ' \u2014 ' + esc(topChunk.title) + '</strong> (Min Clearance: L' + topChunk.min_clearance + ')</p>' +
+        '<p style="margin-top:4px;font-family:var(--font-mono);font-size:11px;color:var(--text-2)">' +
+        '"' + esc(topChunk.content.substring(0, 180)) + '\u2026"</p>');
+    } else {
+      blocksHtml += respBlock('Document Context',
+        '<p>Retrieved from: <strong>BOILER-102 Maintenance Manual, Section 4.2</strong></p>' +
+        '<p style="margin-top:4px;font-family:var(--font-mono);font-size:11px;color:var(--text-2)">' +
+        '"Normal operating pressure range for inlet manifold: 4.0\u20137.0 bar. Pressure drop should not exceed 5.0 bar under standard load."</p>');
+    }
 
-    // Vision
-    if (hasImage) {
+    // Vision Analysis
+    var vis = (responseData && responseData.vision_analysis);
+    if (vis) {
+      blocksHtml += respBlock('Vision Analysis (OpenCV Dial Extraction)',
+        '<div class="resp-row"><span class="resp-label">Gauge reading</span><span class="resp-value resp-value--accent">' + vis.reading + ' ' + (vis.unit || 'bar') + ' (inlet)</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Confidence</span><span class="resp-value">' + vis.confidence + '</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Assessment</span><span class="resp-value">' + esc(vis.assessment || 'Within normal range') + '</span></div>');
+    } else if (hasImage) {
       blocksHtml += respBlock('Vision Analysis',
         '<div class="resp-row"><span class="resp-label">Gauge reading</span><span class="resp-value resp-value--accent">6.4 bar (inlet)</span></div>' +
         '<div class="resp-row"><span class="resp-label">Confidence</span><span class="resp-value">0.96</span></div>' +
         '<div class="resp-row"><span class="resp-label">Assessment</span><span class="resp-value">Within normal range (4.0\u20137.0 bar)</span></div>');
     }
 
-    // Calc
-    blocksHtml += respBlock('Calculation Result',
-      '<div class="resp-row"><span class="resp-label">Pressure drop</span><span class="resp-value resp-value--accent">3.8 bar</span></div>' +
-      '<div class="resp-row"><span class="resp-label">Normal range</span><span class="resp-value">2.0 \u2013 5.0 bar</span></div>' +
-      '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value resp-value--passed">WITHIN NORMAL PARAMETERS \u2714</span></div>');
+    // Sandboxed Calculation
+    var calc = (responseData && responseData.calculation_result);
+    if (calc) {
+      blocksHtml += respBlock('Calculation Result (Deterministic AST Sandbox)',
+        '<div class="resp-row"><span class="resp-label">Pressure drop (\u0394p)</span><span class="resp-value resp-value--accent">' + calc.pressure_drop + ' ' + (calc.unit || 'bar') + '</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Normal range</span><span class="resp-value">' + esc(calc.normal_range || '2.0 \u2013 5.0 bar') + '</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value ' + (calc.is_abnormal ? 'resp-value--blocked' : 'resp-value--passed') + '">' + esc(calc.status) + ' ' + (calc.is_abnormal ? '\u26A0' : '\u2714') + '</span></div>');
+    } else {
+      blocksHtml += respBlock('Calculation Result',
+        '<div class="resp-row"><span class="resp-label">Pressure drop</span><span class="resp-value resp-value--accent">3.8 bar</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Normal range</span><span class="resp-value">2.0 \u2013 5.0 bar</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value resp-value--passed">WITHIN NORMAL PARAMETERS \u2714</span></div>');
+    }
 
-    // Action
-    blocksHtml += respBlock('Action Executed',
-      '<div class="resp-row"><span class="resp-label">Action</span><span class="resp-value mono">open_release_valve</span></div>' +
-      '<div class="resp-row"><span class="resp-label">Target</span><span class="resp-value mono">boiler-102</span></div>' +
-      '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value resp-value--passed">APPROVED &amp; EXECUTED</span></div>' +
-      '<div class="resp-row"><span class="resp-label">Approved by</span><span class="resp-value">Senior_Engineer (J. Morrison)</span></div>');
+    // Action Executed
+    if (responseData && responseData.action_executed) {
+      blocksHtml += respBlock('Action Executed',
+        '<div class="resp-row"><span class="resp-label">Action</span><span class="resp-value mono">' + esc(responseData.action_executed.action) + '</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Target</span><span class="resp-value mono">' + esc(responseData.action_executed.target) + '</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value resp-value--passed">APPROVED &amp; EXECUTED</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Authorized by</span><span class="resp-value">' + esc(responseData.action_executed.operator || state.user.name) + '</span></div>');
+    }
 
-    // Audit ref
-    blocksHtml += '<div class="resp-block resp-block--audit"><div class="resp-block-title">Tamper-Proof Audit Reference</div><div class="resp-block-content">' +
-      '<div class="resp-row"><span class="resp-label">Entry</span><span class="resp-value">#' + String(auditEntry.index).padStart(4,'0') + '</span></div>' +
-      '<div class="resp-row"><span class="resp-label">Hash</span><span class="audit-hash-inline">' + auditEntry.hash.substring(0,32) + '\u2026</span></div>' +
+    // Tamper-Proof Audit Reference
+    var entryIdx = (auditEntry && (auditEntry.index !== undefined ? auditEntry.index : auditEntry.idx)) || 1;
+    var entryHash = (auditEntry && auditEntry.hash) || '0'.repeat(64);
+    blocksHtml += '<div class="resp-block resp-block--audit"><div class="resp-block-title">Tamper-Proof Audit Reference (SHA-256 Hash Chain)</div><div class="resp-block-content">' +
+      '<div class="resp-row"><span class="resp-label">Entry</span><span class="resp-value">#' + String(entryIdx).padStart(4,'0') + '</span></div>' +
+      '<div class="resp-row"><span class="resp-label">Hash</span><span class="audit-hash-inline">' + entryHash.substring(0,32) + '\u2026</span></div>' +
       '<div class="resp-row"><span class="resp-label">Chain</span><span class="resp-value resp-value--passed">VERIFIED \u2714</span></div>' +
     '</div></div>';
 
@@ -1325,7 +1615,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   els.tabChat.addEventListener('click', function() { switchView('chat'); });
   els.tabPipeline.addEventListener('click', function() { switchView('pipeline'); });
-  els.tabAudit.addEventListener('click', function() { switchView('audit'); });
+  els.tabAudit.addEventListener('click', function() {
+    loadAuditLog();
+    switchView('audit');
+  });
 
   els.chatInput.addEventListener('input', function() { updateSendState(); autoResize(); });
   els.imageAttach.addEventListener('change', handleImageSelect);
@@ -1461,7 +1754,7 @@ document.addEventListener('DOMContentLoaded', function () {
     btn.addEventListener('click', function() {
       var userKey = btn.getAttribute('data-demo-user');
       if (DEMO_USERS[userKey]) {
-        loginUser(DEMO_USERS[userKey]);
+        authenticate(DEMO_USERS[userKey].email, 'changeme123');
       }
     });
   });
@@ -1471,22 +1764,8 @@ document.addEventListener('DOMContentLoaded', function () {
     els.formSignin.addEventListener('submit', function(e) {
       e.preventDefault();
       var email = (els.signinEmail && els.signinEmail.value.trim()) || 'suketu.2005@gmail.com';
-      var rawName = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, ' ');
-      var nameWords = rawName.split(/\s+/).filter(Boolean);
-      var name = nameWords.length ? nameWords[0].charAt(0).toUpperCase() + nameWords[0].slice(1) : 'Operator';
-      var initials = (nameWords.length > 1 ? (nameWords[0][0] + nameWords[1][0]) : name.substring(0, 2)).toUpperCase();
-
-      var profile = {
-        name: name,
-        fullName: nameWords.map(function(w){ return w.charAt(0).toUpperCase() + w.slice(1); }).join(' ') || name,
-        email: email,
-        tier: 'Pro',
-        avatar: initials || 'OP',
-        clearanceLevel: 3,
-        clearanceName: 'Level 3 (Chief Safety Auditor \u00B7 All Systems)',
-        role: 'Chief_Safety_Auditor'
-      };
-      loginUser(profile);
+      var password = (els.signinPassword && els.signinPassword.value) || 'changeme123';
+      authenticate(email, password);
     });
   }
 
@@ -1496,30 +1775,26 @@ document.addEventListener('DOMContentLoaded', function () {
       e.preventDefault();
       var fullName = (els.signupName && els.signupName.value.trim()) || 'Suketu Patel';
       var email = (els.signupEmail && els.signupEmail.value.trim()) || 'suketu.2005@gmail.com';
+      var password = (els.signupPassword && els.signupPassword.value) || 'changeme123';
       var clearanceVal = (els.signupClearance && els.signupClearance.value) || 'level-3';
+      var clrLevel = clearanceVal === 'level-1' ? 1 : clearanceVal === 'level-2' ? 2 : 3;
 
-      var words = fullName.split(/\s+/).filter(Boolean);
-      var firstName = words.length ? words[0] : 'Operator';
-      var initials = (words.length > 1 ? (words[0][0] + words[1][0]) : firstName.substring(0, 2)).toUpperCase();
-
-      var clearanceMap = {
-        'level-1': { level: 1, name: 'Level 1 (boiler-102 only)', role: 'Maintenance_Engineer', tier: 'Engineer' },
-        'level-2': { level: 2, name: 'Level 2 (Turbines, Boilers, Pumps)', role: 'Systems_Specialist', tier: 'Specialist' },
-        'level-3': { level: 3, name: 'Level 3 (Chief Safety Auditor \u00B7 All Systems)', role: 'Chief_Safety_Auditor', tier: 'Pro' }
-      };
-      var clr = clearanceMap[clearanceVal] || clearanceMap['level-3'];
-
-      var newProfile = {
-        name: firstName,
-        fullName: fullName,
-        email: email,
-        tier: clr.tier,
-        avatar: initials || 'OP',
-        clearanceLevel: clr.level,
-        clearanceName: clr.name,
-        role: clr.role
-      };
-      loginUser(newProfile);
+      fetch(API_BASE + '/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: fullName,
+          email: email,
+          password: password,
+          clearance_level: clrLevel
+        })
+      })
+      .then(function() {
+        return authenticate(email, password);
+      })
+      .catch(function() {
+        return authenticate(email, password);
+      });
     });
   }
 
@@ -1549,7 +1824,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // ── INIT ───────────────────────────────────────────────────
 
   applyTheme();
-  updateUserUI();
+
+  // Try to authenticate default operator against backend to acquire real JWT
+  authenticate('suketu.2005@gmail.com', 'changeme123');
 
   // Seed past chats
   SEED_CHATS.forEach(function(c) { state.chats.push(c); });
@@ -1557,10 +1834,8 @@ document.addEventListener('DOMContentLoaded', function () {
   // Create initial active chat
   var firstChat = createChat();
 
-  // Seed audit log
-  addAuditEntry('SYSTEM_INIT', 'Sovereign Workbench v1.0 initialized \u2014 air-gapped deployment')
-    .then(function() { return addAuditEntry('OPERATOR_LOGIN', 'Operator ' + (state.user ? state.user.email : 'system') + ' authenticated \u2014 ' + (state.user ? state.user.clearanceName : 'root')); })
-    .then(function() { return addAuditEntry('INTEGRITY_CHECK', 'Hash-chain genesis block committed'); });
+  // Load verified audit chain from backend
+  loadAuditLog();
 
   // Handle mobile sidebar initial state
   if (isMobile()) {

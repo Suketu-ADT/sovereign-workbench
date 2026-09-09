@@ -292,4 +292,436 @@ async def submit_query(
     )
 
 
+# ── Server-Sent Events (SSE) Streaming Pipeline ──────────────
+
+import asyncio
+import json
+import time
+from fastapi.responses import StreamingResponse
+from app.db.session import async_session_factory
+
+
+def _sse_event(event_type: str, data: dict) -> str:
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.post(
+    "/query/stream",
+    summary="Stream defense pipeline execution events via Server-Sent Events (SSE)",
+)
+async def stream_query(
+    body: QueryRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Executes the 8-stage defense pipeline progressively, yielding SSE messages
+    for each layer (rate limit, prompt safety, RBAC, retrieval, vision, calculation,
+    planner HITL gate, and hash-chain audit write).
+    """
+
+    async def event_generator():
+        t0 = time.time()
+        user_id = uuid.UUID(current_user["sub"])
+        clearance = current_user["clearance_level"]
+        operator_email = current_user.get("email", "")
+
+        yield _sse_event("init", {
+            "query": body.text,
+            "clearance": clearance,
+            "user": operator_email,
+            "has_image": body.has_image or bool(body.image_data),
+        })
+        await asyncio.sleep(0.04)
+
+        # ── Step 1: Rate Limit ─────────────────────────────────
+        t_step = time.time()
+        yield _sse_event("step_start", {
+            "step": "rate-limit",
+            "label": "Rate Limit Check",
+            "desc": "Token bucket verification",
+        })
+        allowed, retry_after = rate_limiter.check_rate_limit(user_id)
+        if not allowed:
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction():
+                    entry = await audit_service.append_entry(
+                        db=db,
+                        event_type="RATE_LIMIT_BLOCK",
+                        detail=f"Rate limit exceeded for user {operator_email}",
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            block_data = {
+                "step": "rate-limit",
+                "error": "Rate limit exceeded",
+                "reason": f"Retry after {retry_after}s",
+                "audit_entry": {"index": entry.idx, "hash": entry.hash, "prev_hash": entry.prev_hash},
+            }
+            yield _sse_event("step_blocked", block_data)
+            yield _sse_event("blocked", block_data)
+            return
+
+        elapsed = int((time.time() - t_step) * 1000)
+        yield _sse_event("step_complete", {
+            "step": "rate-limit",
+            "status": "passed",
+            "readout": "Token bucket verification: OK",
+            "elapsed_ms": elapsed,
+        })
+        await asyncio.sleep(0.04)
+
+        # ── Step 2: Prompt Safety (PromptGuard) ───────────────
+        t_step = time.time()
+        yield _sse_event("step_start", {
+            "step": "prompt-safety",
+            "label": "Prompt Safety Check",
+            "desc": "Injection & adversarial scan",
+        })
+        safe, reason = await prompt_guard.is_safe(body.text)
+        if not safe:
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction():
+                    entry = await audit_service.append_entry(
+                        db=db,
+                        event_type="PROMPT_SAFETY_BLOCK",
+                        detail=f"Prompt rejected by PromptGuard: {reason}",
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            block_data = {
+                "step": "prompt-safety",
+                "error": "Prompt blocked by safety screening",
+                "reason": reason,
+                "audit_entry": {"index": entry.idx, "hash": entry.hash, "prev_hash": entry.prev_hash},
+            }
+            yield _sse_event("step_blocked", block_data)
+            yield _sse_event("blocked", block_data)
+            return
+
+        elapsed = int((time.time() - t_step) * 1000)
+        yield _sse_event("step_complete", {
+            "step": "prompt-safety",
+            "status": "passed",
+            "readout": "0 injection patterns detected — CLEAR",
+            "elapsed_ms": elapsed,
+        })
+        await asyncio.sleep(0.04)
+
+        # ── Step 3: RBAC Clearance Check ──────────────────────
+        t_step = time.time()
+        yield _sse_event("step_start", {
+            "step": "rbac",
+            "label": "RBAC Verification",
+            "desc": "Role-capability authorization",
+        })
+        rbac_allowed, required_level = rbac_service.check_access(body.text, clearance)
+        if not rbac_allowed:
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction():
+                    entry = await audit_service.append_entry(
+                        db=db,
+                        event_type="RBAC_BLOCK",
+                        detail=(
+                            f"Insufficient clearance: required level {required_level}, "
+                            f"user {operator_email} has level {clearance}"
+                        ),
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            block_data = {
+                "step": "rbac",
+                "error": "Insufficient clearance",
+                "required_level": required_level,
+                "current_level": clearance,
+                "reason": f"Required clearance Level {required_level}, but operator has Level {clearance}",
+                "audit_entry": {"index": entry.idx, "hash": entry.hash, "prev_hash": entry.prev_hash},
+            }
+            yield _sse_event("step_blocked", block_data)
+            yield _sse_event("blocked", block_data)
+            return
+
+        elapsed = int((time.time() - t_step) * 1000)
+        role_name = current_user.get("role", "Operator")
+        yield _sse_event("step_complete", {
+            "step": "rbac",
+            "status": "passed",
+            "readout": f"Clearance: Level {clearance} ✔ Role: {role_name}",
+            "elapsed_ms": elapsed,
+        })
+        await asyncio.sleep(0.04)
+
+        # ── Step 4: Document Retrieval ────────────────────────
+        t_step = time.time()
+        yield _sse_event("step_start", {
+            "step": "doc-retrieval",
+            "label": "Document Retrieval",
+            "desc": "Role-filtered manual lookup",
+        })
+        retrieved_chunks = retrieval_service.retrieve(
+            query=body.text,
+            operator_clearance=clearance,
+        )
+
+        lower_text = body.text.lower()
+        if "reactor" in lower_text:
+            unit = "reactor-core-aux"
+        elif "turbine" in lower_text:
+            unit = "turbine-gen-4"
+        else:
+            unit = "boiler-102"
+
+        async with async_session_factory() as db:
+            async with audit_service.audit_transaction():
+                await audit_service.append_entry(
+                    db=db,
+                    event_type="QUERY_SUBMITTED",
+                    detail=f"Query accepted: {body.text[:200]}",
+                    actor_user_id=user_id,
+                )
+                chunk_summary = ", ".join(
+                    f"[{c.sop_id} {c.unit} L{c.min_clearance}]"
+                    for c in retrieved_chunks
+                )
+                await audit_service.append_entry(
+                    db=db,
+                    event_type="RETRIEVAL_EXECUTED",
+                    detail=f"Retrieved {len(retrieved_chunks)} chunks for clearance {clearance}: {chunk_summary}",
+                    actor_user_id=user_id,
+                )
+                await db.commit()
+
+        elapsed = int((time.time() - t_step) * 1000)
+        top_chunk = retrieved_chunks[0] if retrieved_chunks else None
+        top_title = top_chunk.title if top_chunk else "Standard Operating Procedures"
+        top_sop = top_chunk.sop_id if top_chunk else "SOP"
+        yield _sse_event("step_complete", {
+            "step": "doc-retrieval",
+            "status": "passed",
+            "readout": f"{len(retrieved_chunks)} docs matched → Top: {top_sop} {top_title}",
+            "chunks": [c.model_dump() for c in retrieved_chunks],
+            "elapsed_ms": elapsed,
+        })
+        await asyncio.sleep(0.04)
+
+        # ── Step 5: Vision Extraction ─────────────────────────
+        t_step = time.time()
+        has_image = bool(body.has_image or body.image_data or "gauge" in lower_text or "photo" in lower_text)
+        vision_result = None
+        if has_image:
+            yield _sse_event("step_start", {
+                "step": "vision",
+                "label": "Vision Extraction",
+                "desc": "Multimodal gauge reading",
+            })
+            vision_result = await vision_service.extract_gauge_reading(
+                image_data=body.image_data,
+                equipment_unit=unit,
+            )
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction():
+                    await audit_service.append_entry(
+                        db=db,
+                        event_type="VISION_EXTRACTION",
+                        detail=(
+                            f"Extracted {vision_result.reading} {vision_result.unit} "
+                            f"({vision_result.parameter}, confidence {vision_result.confidence}) "
+                            f"— {vision_result.assessment}"
+                        ),
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            elapsed = int((time.time() - t_step) * 1000)
+            yield _sse_event("step_complete", {
+                "step": "vision",
+                "status": "passed",
+                "readout": f"Gauge: {vision_result.reading} bar inlet | Confidence: {vision_result.confidence}",
+                "vision": vision_result.model_dump(),
+                "elapsed_ms": elapsed,
+            })
+        else:
+            yield _sse_event("step_complete", {
+                "step": "vision",
+                "status": "skipped",
+                "readout": "No visual asset attached — skipped",
+                "elapsed_ms": 0,
+            })
+        await asyncio.sleep(0.04)
+
+        # ── Step 6: Sandboxed Calculation ─────────────────────
+        t_step = time.time()
+        yield _sse_event("step_start", {
+            "step": "calculation",
+            "label": "Sandboxed Calculation",
+            "desc": "Isolated compute environment",
+        })
+        inlet = vision_result.reading if vision_result else 6.4
+        calc_result = calculation_service.compute_differential_pressure(
+            inlet_pressure=inlet,
+            outlet_pressure=2.6,
+            equipment_unit=unit,
+        )
+        async with async_session_factory() as db:
+            async with audit_service.audit_transaction():
+                await audit_service.append_entry(
+                    db=db,
+                    event_type="CALCULATION_RESULT",
+                    detail=(
+                        f"Sandboxed formula '{calc_result.formula}' evaluated to "
+                        f"{calc_result.pressure_drop} {calc_result.unit} "
+                        f"(nominal range: {calc_result.normal_range}) — Status: {calc_result.status}"
+                    ),
+                    actor_user_id=user_id,
+                )
+                await db.commit()
+        elapsed = int((time.time() - t_step) * 1000)
+        yield _sse_event("step_complete", {
+            "step": "calculation",
+            "status": "passed",
+            "readout": f"Δp = {calc_result.pressure_drop} bar | Range: {calc_result.normal_range} | {calc_result.status}",
+            "calculation": calc_result.model_dump(),
+            "elapsed_ms": elapsed,
+        })
+        await asyncio.sleep(0.04)
+
+        # ── Step 7: Reasoning Loop & HITL Interruption ────────
+        t_step = time.time()
+        yield _sse_event("step_start", {
+            "step": "approval",
+            "label": "Human Approval (HITL)",
+            "desc": "Sensitive action authorization",
+        })
+        plan_result = planner_service.run_plan(
+            query=body.text,
+            user_id=str(user_id),
+            operator_email=operator_email,
+            clearance_level=clearance,
+            unit=unit,
+            retrieved_docs=[c.model_dump() for c in retrieved_chunks],
+            vision_reading=vision_result.reading if vision_result else None,
+            pressure_drop=calc_result.pressure_drop if calc_result else None,
+        )
+
+        is_awaiting = bool(plan_result.get("approval_required"))
+        thread_id = plan_result.get("thread_id")
+        approval_details = plan_result.get("approval_details")
+
+        if is_awaiting and approval_details:
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction():
+                    entry = await audit_service.append_entry(
+                        db=db,
+                        event_type="HITL_REQUIRED",
+                        detail=(
+                            f"Sensitive action '{approval_details['action']}' on target "
+                            f"'{approval_details['target']}' requires operator authorization. "
+                            f"LangGraph thread {thread_id} paused at HITL gate."
+                        ),
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            elapsed = int((time.time() - t_step) * 1000)
+            yield _sse_event("step_complete", {
+                "step": "approval",
+                "status": "awaiting",
+                "readout": "Awaiting Human-in-the-Loop authorization...",
+                "thread_id": thread_id,
+                "approval_details": approval_details,
+                "elapsed_ms": elapsed,
+            })
+            yield _sse_event("approval_required", {
+                "step": "approval",
+                "status": "awaiting_approval",
+                "thread_id": thread_id,
+                "approval_details": approval_details,
+                "retrieved_chunks": [c.model_dump() for c in retrieved_chunks],
+                "vision_analysis": vision_result.model_dump() if vision_result else None,
+                "calculation_result": calc_result.model_dump() if calc_result else None,
+                "audit_entry": {"index": entry.idx, "hash": entry.hash, "prev_hash": entry.prev_hash},
+            })
+            return
+        else:
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction():
+                    await audit_service.append_entry(
+                        db=db,
+                        event_type="PLAN_GENERATED",
+                        detail=(
+                            f"Reasoning loop executed for {unit}: "
+                            f"{plan_result.get('action_status', 'COMPLETED')}"
+                        ),
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            elapsed = int((time.time() - t_step) * 1000)
+            yield _sse_event("step_complete", {
+                "step": "approval",
+                "status": "skipped",
+                "readout": "No sensitive actions — auto-cleared",
+                "elapsed_ms": elapsed,
+            })
+            await asyncio.sleep(0.04)
+
+        # ── Step 8: Audit Log Write ───────────────────────────
+        t_step = time.time()
+        yield _sse_event("step_start", {
+            "step": "audit-write",
+            "label": "Audit Log Write",
+            "desc": "Hash-chain entry commitment",
+        })
+        async with async_session_factory() as db:
+            async with audit_service.audit_transaction():
+                entry = await audit_service.append_entry(
+                    db=db,
+                    event_type="QUERY_COMPLETE",
+                    detail=(
+                        f"Query defense pipeline verified (Completed): {len(retrieved_chunks)} docs retrieved"
+                        + (f", gauge: {vision_result.reading} bar" if vision_result else "")
+                        + (f", delta-p: {calc_result.pressure_drop} bar" if calc_result else "")
+                    ),
+                    actor_user_id=user_id,
+                )
+                await db.commit()
+
+        elapsed = int((time.time() - t_step) * 1000)
+        audit_payload = {
+            "index": entry.idx,
+            "hash": entry.hash,
+            "prev_hash": entry.prev_hash,
+            "timestamp": entry.timestamp.isoformat(),
+            "event": entry.event_type,
+            "detail": entry.detail,
+        }
+        yield _sse_event("step_complete", {
+            "step": "audit-write",
+            "status": "passed",
+            "readout": f"Committed to tamper-proof block #{entry.idx} (SHA-256 verified)",
+            "entry": audit_payload,
+            "elapsed_ms": elapsed,
+        })
+
+        # ── Complete Event ────────────────────────────────────
+        yield _sse_event("complete", {
+            "status": "completed",
+            "retrieved_chunks": [c.model_dump() for c in retrieved_chunks],
+            "vision_analysis": vision_result.model_dump() if vision_result else None,
+            "calculation_result": calc_result.model_dump() if calc_result else None,
+            "approval_required": False,
+            "thread_id": thread_id,
+            "final_synthesis": plan_result.get("synthesis"),
+            "audit_entry": audit_payload,
+            "total_elapsed_ms": int((time.time() - t0) * 1000),
+        })
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+
 

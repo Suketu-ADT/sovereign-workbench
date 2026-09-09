@@ -37,10 +37,9 @@ This repository is being built across 8 deliberate engineering phases:
 - [x] **Phase 2 — Prompt Guard (Llama-Guard-3)**: Input safety screening layer situated ahead of RBAC (Step 2) with dual-engine deterministic OT injection scanner and local Llama-Guard-3 client to block and audit adversarial prompt injections. Fully verified.
 - [x] **Phase 3 — Real Document Retrieval ("Iron Vault")**: Qdrant vector database with on-premise FastEmbed local embeddings (`BAAI/bge-small-en-v1.5`), clearance-tagged plant SOP manual chunks, zero-leakage vector pre-filtering (`min_clearance <= user_clearance`), and `RETRIEVAL_CHUNKS_ACCESSED` audit logging. Fully verified.
 - [x] **Phase 4 — Vision & Sandboxed Calculation**: Local Qwen2.5-VL gauge-reading extraction from photos with air-gapped OpenCV needle angle fallback, and isolated AST sandbox for deterministic $\Delta p$ pressure drop calculation with `VISION_EXTRACTION` and `CALCULATION_RESULT` audit commitment. Fully verified.
-- [ ] **Phase 5 — Planner & Orchestration**: LangGraph + Qwen 2.5 local reasoning loop with static capability-map allowlist guardrails and `interrupt()` execution for sensitive actions. *(Active Phase)*
-
-- [ ] **Phase 6 — HITL Streaming & Frontend Rewiring**: Server-Sent Events (`/query/{id}/stream`), human authorization decision endpoints (`/approvals/{id}/decision`), and rewiring `script.js` from client-side `setTimeout` simulation to real backend SSE events.
-- [ ] **Phase 7 — Comprehensive Security Review & E2E Validation**: Input validation, photo upload safety, dependency audit, and automated end-to-end integration tests.
+- [x] **Phase 5 — Planner & Orchestration**: LangGraph state graph reasoning loop with static capability-map allowlist guardrails, `interrupt()` execution on sensitive actuator commands (`open_release_valve`), and operator authorization endpoints (`/approvals/pending`, `/approvals/{id}/decision`). Fully verified.
+- [x] **Phase 6 — HITL Streaming & Frontend Rewiring**: Server-Sent Events (`/query/stream`), live human authorization decision endpoints (`/approvals/{id}/decision`), and complete rewiring of `script.js` to real backend endpoints (`/auth/login`, `/query/stream`, `/approvals`, `/audit`) with progressive SSE updates and air-gapped offline fallback. Fully verified.
+- [ ] **Phase 7 — Comprehensive Security Review & E2E Validation**: Input validation, photo upload safety, dependency audit, and automated end-to-end integration tests. *(Active Phase)*
 - [ ] **Phase 8 — Final Deployment & Production Verification**: Multi-container Docker Compose deployment on dedicated GPU hardware and verified operational checklist.
 
 ---
@@ -176,7 +175,7 @@ npx serve .
 Navigate to `http://localhost:8080`.
 
 > [!NOTE]
-> **Frontend Runtime Architecture**: The frontend console currently runs in interactive visual demo mode using client-side `setTimeout` simulations. The verified Phase 0/1 FastAPI backend is located under [`backend/`](file:///c:/Users/Arpit%20singh/OneDrive/Desktop/SIH/backend). In **Phase 6**, `script.js` will undergo a data-source swap to listen directly to real pipeline Server-Sent Events (SSE).
+> **Frontend Runtime Architecture**: The frontend console (`index.html` + `script.js`) is fully wired to the FastAPI backend via real Server-Sent Events (SSE) streaming at `http://127.0.0.1:8000/query/stream`, with live JWT auth (`/auth/login`), HITL approval resumption (`/approvals/{id}/decision`), and cryptographic hash-chain synchronization (`/audit`). If run standalone without the server, it seamlessly activates an air-gapped local fallback mode.
 
 ### Option 3: Run the FastAPI Backend (Phase 0/1)
 ```bash

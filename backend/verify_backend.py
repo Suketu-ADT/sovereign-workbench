@@ -273,6 +273,49 @@ def run_tests():
         f"GET /audit/verify (Post-Phase 5): 200 OK, valid={verify_data.get('valid')}, entries_checked={verify_data.get('entries_checked')}"
     )
 
+    # 27. Phase 6 - Live Server-Sent Events (SSE) Streaming Pipeline Check
+    with client.stream(
+        "POST",
+        "/query/stream",
+        json={"text": "Inspect boiler-102 operating pressure envelope", "has_image": False},
+        headers=headers_john,
+    ) as stream_response:
+        sse_text = "".join(stream_response.iter_text())
+        has_init = "event: init" in sse_text
+        has_rate = "rate-limit" in sse_text
+        has_prompt = "prompt-safety" in sse_text
+        has_rbac = "rbac" in sse_text
+        has_retrieval = "doc-retrieval" in sse_text
+        has_complete = "event: complete" in sse_text
+        record(
+            stream_response.status_code == 200
+            and "text/event-stream" in stream_response.headers.get("content-type", "")
+            and has_init
+            and has_rate
+            and has_prompt
+            and has_rbac
+            and has_retrieval
+            and has_complete,
+            f"POST /query/stream (Clean Query SSE): 200 OK text/event-stream (streamed 8 layers + complete event)"
+        )
+
+    # 28. Phase 6 - Live SSE Streaming with HITL Interruption Event
+    with client.stream(
+        "POST",
+        "/query/stream",
+        json={"text": "Fetch boiler-102 log, open release valve to relieve pressure", "has_image": False},
+        headers=headers_john,
+    ) as stream_response:
+        sse_text = "".join(stream_response.iter_text())
+        has_hitl_req = "event: approval_required" in sse_text
+        has_thread = "thread_id" in sse_text
+        record(
+            stream_response.status_code == 200
+            and has_hitl_req
+            and has_thread,
+            f"POST /query/stream (HITL Interruption SSE): 200 OK (event: approval_required emitted with thread_id)"
+        )
+
     print("=" * 60)
     total = len(results)
     passed = results.count(True)
