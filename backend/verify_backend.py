@@ -161,17 +161,38 @@ def run_tests():
     r = client.post("/query", json={"text": "General maintenance procedures overview", "has_image": False}, headers=headers_john)
     record(r.status_code == 200, f"RBAC Unrestricted query (no unit): 200 ALLOWED")
 
-    # 18. Audit Log - List Entries (Verify RETRIEVAL_EXECUTED is present)
-    r = client.get("/audit?limit=20", headers=headers_suketu)
-    entries = r.json().get("entries", [])
-    retrieval_logs = [e for e in entries if e.get("event") in ("RETRIEVAL_EXECUTED", "RETRIEVAL_CHUNKS_ACCESSED")]
+    # 18. Phase 4 - Multimodal Gauge Reading & Sandboxed Calculation (John Morrison querying boiler-102)
+    from app.services.vision_service import vision_service
+    synthetic_gauge = vision_service.generate_synthetic_gauge(pressure_bar=6.4)
+    r = client.post(
+        "/query",
+        json={
+            "text": "Fetch boiler-102 log, read gauge photo, calculate pressure drop, open release valve if abnormal.",
+            "has_image": True,
+            "image_data": synthetic_gauge,
+        },
+        headers=headers_john,
+    )
+    res_data = r.json()
+    vis = res_data.get("vision_analysis")
+    calc = res_data.get("calculation_result")
     record(
-        r.status_code == 200 and len(retrieval_logs) > 0,
-        f"GET /audit (RETRIEVAL_EXECUTED): 200 OK (found {len(retrieval_logs)} retrieval audit events, newest: {retrieval_logs[0].get('detail')[:45]}...)"
+        r.status_code == 200 and vis is not None and calc is not None and abs(vis.get("reading", 0) - 6.4) <= 0.2 and abs(calc.get("pressure_drop", 0) - 3.8) <= 0.2,
+        f"Multimodal Vision & Calculation: 200 OK (gauge: {vis.get('reading') if vis else None} bar, delta-p: {calc.get('pressure_drop') if calc else None} bar - {calc.get('status') if calc else None})"
     )
 
+    # 19. Audit Log - List Entries (Verify RETRIEVAL_EXECUTED, VISION_EXTRACTION, and CALCULATION_RESULT)
+    r = client.get("/audit?limit=30", headers=headers_suketu)
+    entries = r.json().get("entries", [])
+    retrieval_logs = [e for e in entries if e.get("event") in ("RETRIEVAL_EXECUTED", "RETRIEVAL_CHUNKS_ACCESSED")]
+    vision_logs = [e for e in entries if e.get("event") == "VISION_EXTRACTION"]
+    calc_logs = [e for e in entries if e.get("event") == "CALCULATION_RESULT"]
+    record(
+        r.status_code == 200 and len(retrieval_logs) > 0 and len(vision_logs) > 0 and len(calc_logs) > 0,
+        f"GET /audit (Pipeline Events): 200 OK (found {len(retrieval_logs)} retrieval, {len(vision_logs)} vision, {len(calc_logs)} calculation events)"
+    )
 
-    # 19. Audit Log - Verify Hash Chain Cryptographic Integrity
+    # 20. Audit Log - Verify Hash Chain Cryptographic Integrity
     r = client.get("/audit/verify", headers=headers_suketu)
     verify_data = r.json()
     record(
@@ -179,13 +200,14 @@ def run_tests():
         f"GET /audit/verify: 200 OK, valid={verify_data.get('valid')}, entries_checked={verify_data.get('entries_checked')}, broken_at={verify_data.get('broken_at_index')}"
     )
 
-    # 20. Audit Log - Export Ledger
+    # 21. Audit Log - Export Ledger
     r = client.get("/audit/export", headers=headers_suketu)
     export_data = r.json()
     record(
         r.status_code == 200 and export_data.get("entryCount") > 0 and export_data.get("genesisHash") is not None,
         f"GET /audit/export: 200 OK, entryCount={export_data.get('entryCount')}, genesisHash={export_data.get('genesisHash')[:16]}..., headHash={export_data.get('currentHeadHash')[:16]}..."
     )
+
 
 
     print("=" * 60)

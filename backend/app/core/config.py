@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
     RAG_TOP_K: int = 3
 
+    # ── Multimodal Vision (Qwen2.5-VL / OpenCV) ───────────────
+    VISION_MODEL_ENABLED: bool = True
+    VISION_MODEL_URL: str = "http://127.0.0.1:11434"
+    VISION_MODEL_NAME: str = "qwen2.5-vl:7b"
+    VISION_TIMEOUT: float = 5.0
+
 
 settings = Settings()
+
 
