@@ -132,43 +132,7 @@ class VisionService:
             logger.warning("Failed to decode image buffer: %s", e)
             return None
 
-    def _analyze_gauge_opencv(self, img: np.ndarray) -> tuple[float, float]:
-        """
-        Extracts pressure dial reading from image using circle detection and needle vector angle.
-        Returns (reading_bar, confidence).
-        """
-        h, w = img.shape[:2]
-        center_x, center_y = w // 2, int(h * 0.55)
-
-        # 1. Search for red/accent colored needle
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        # Red spans 0-10 and 170-180 in OpenCV HSV
-        mask1 = cv2.inRange(hsv, np.array([0, 70, 50]), np.array([10, 255, 255]))
-        mask2 = cv2.inRange(hsv, np.array([170, 70, 50]), np.array([180, 255, 255]))
-        mask = mask1 | mask2
-
-        pts = cv2.findNonZero(mask)
-        if pts is not None and len(pts) > 5:
-            pts = pts.reshape(-1, 2)
-            # Find the point furthest from the dial pivot center
-            dists = np.linalg.norm(pts - np.array([center_x, center_y]), axis=1)
-            tip = pts[np.argmax(dists)]
-
-            # Angle from dial pivot
-            calc_angle = math.atan2(tip[1] - center_y, tip[0] - center_x)
-            if calc_angle < 0:
-                calc_angle += 2 * math.pi
-
-            # Dial arc spans pi to 2*pi for top half (0 to 10 bar)
-            if calc_angle >= math.pi:
-                fraction = (calc_angle - math.pi) / math.pi
-                reading = round(fraction * 10.0, 1)
-                # Cap within valid instrument range [0.0, 10.0]
-                reading = max(0.0, min(10.0, reading))
-                return reading, 0.96
-
-        # Standard benchmark reading for calibrated plant gauge
-        return 6.4, 0.96
+    
 
     async def extract_gauge_reading(
         self,
@@ -231,8 +195,15 @@ class VisionService:
                 pass
 
         if reading is None:
-            # 2. OpenCV computer vision needle extraction
-            reading, confidence = self._analyze_gauge_opencv(img)
+            return VisionResult(
+                status="extraction_failed",
+                reading=None,
+                unit="bar",
+                parameter="inlet_pressure",
+                confidence=0.0,
+                assessment="VLM extraction failed or model unavailable",
+                error="Failed to extract numerical reading from image",
+            )
 
         # Formulate assessment based on operational equipment parameters
         if equipment_unit == "boiler-102" or "boiler" in equipment_unit:

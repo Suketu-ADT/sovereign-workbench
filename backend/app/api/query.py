@@ -143,7 +143,7 @@ async def submit_query(
     # ── Step 6: Sandboxed Calculation (deterministic delta-p) ─
     calc_result = None
     if vision_result and vision_result.status == "success" and vision_result.reading is not None:
-        calc_result = calculation_service.compute_differential_pressure(
+        calc_result = await calculation_service.compute_differential_pressure(
             inlet_pressure=vision_result.reading,
             outlet_pressure=2.6,
             equipment_unit=unit,
@@ -606,7 +606,7 @@ async def stream_query(
         })
         calc_result = None
         if vision_result and vision_result.status == "success" and vision_result.reading is not None:
-            calc_result = calculation_service.compute_differential_pressure(
+            calc_result = await calculation_service.compute_differential_pressure(
                 inlet_pressure=vision_result.reading,
                 outlet_pressure=2.6,
                 equipment_unit=unit,

@@ -130,6 +130,7 @@ async def _query_llama_guard(prompt: str) -> Tuple[bool, str | None]:
     try:
         async with httpx.AsyncClient(timeout=settings.PROMPT_GUARD_TIMEOUT) as client:
             resp = await client.post(url, json=payload)
+            resp.raise_for_status()
             if resp.status_code == 200:
                 body = resp.json()
                 output = body.get("response", "").strip()

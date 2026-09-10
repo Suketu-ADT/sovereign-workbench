@@ -20,6 +20,11 @@ CAPABILITY_MAP: dict[str, int] = {
     "turbine-gen-4":    2,
     "compressor":       2,
     "reactor-core-aux": 3,
+    "open_release_valve": 3,
+    "adjust_governor": 2,
+    "scram_containment": 3,
+    "emergency_shutdown": 3,
+    "override": 3,
 }
 
 # Pre-compiled pattern for efficient keyword matching

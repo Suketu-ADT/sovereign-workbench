@@ -36,7 +36,7 @@ async def test_planner_nonsensitive_flow():
     assert res["approval_required"] is False
     assert res["approval_details"] is None
     assert res["action_status"] == "NOT_REQUIRED"
-    assert "nominal boundaries" in res["synthesis"]
+    assert "mocked reading info" in res["synthesis"]
 
 
 @pytest.mark.asyncio
@@ -47,7 +47,7 @@ async def test_planner_sensitive_interruption_and_resume():
         query="Fetch boiler-102 log, open release valve if abnormal",
         user_id="test-user-1",
         operator_email="j.morrison@plant.internal",
-        clearance_level=1,
+        clearance_level=3,
         unit="boiler-102",
         vision_reading=6.4,
         pressure_drop=3.8,
@@ -56,7 +56,7 @@ async def test_planner_sensitive_interruption_and_resume():
     assert res["approval_required"] is True
     details = res["approval_details"]
     assert details["action"] == "open_release_valve"
-    assert "release valve #4" in details["target"]
+    assert "boiler-102" in details["target"]
     assert "Senior_Engineer" in details["authority"]
 
     thread_id = res["thread_id"]
@@ -87,7 +87,7 @@ async def test_planner_sensitive_rejection():
         query="Open release valve on boiler-102 immediately",
         user_id="test-user-1",
         operator_email="j.morrison@plant.internal",
-        clearance_level=1,
+        clearance_level=3,
         unit="boiler-102",
     )
     assert res["status"] == "awaiting_approval"
@@ -116,33 +116,33 @@ async def test_approvals_api_lifecycle():
     """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Login John Morrison (Level 1)
+        # Login Elena Vance (Level 2)
         login_res = await client.post(
             "/auth/login",
-            json={"email": "j.morrison@plant.internal", "password": "changeme123"},
+            json={"email": "elena.vance@plant.internal", "password": "changeme123"},
         )
         assert login_res.status_code == 200
-        token_john = login_res.json()["access_token"]
-        headers_john = {"Authorization": f"Bearer {token_john}"}
+        token_elena = login_res.json()["access_token"]
+        headers_elena = {"Authorization": f"Bearer {token_elena}"}
 
-        # 1. Submit query requesting valve action
-        query_text = "Fetch boiler-102 log, calculate pressure drop, open release valve if abnormal."
+        # 1. Submit query requesting governor action
+        query_text = "Fetch turbine-gen-4 log, calculate pressure drop, adjust governor if abnormal."
         q_res = await client.post(
             "/query",
-            json={"text": query_text, "has_image": False},
-            headers=headers_john,
+            json={"text": query_text, "has_image": False, "unit": "turbine-gen-4"},
+            headers=headers_elena,
         )
         assert q_res.status_code == 200
         q_data = q_res.json()
         assert q_data["status"] == "awaiting_approval"
         assert q_data["approval_required"] is True
         assert q_data["approval_details"] is not None
-        assert q_data["approval_details"]["action"] == "open_release_valve"
+        assert q_data["approval_details"]["action"] == "adjust_governor"
         thread_id = q_data["thread_id"]
         assert thread_id is not None
 
         # 2. Inspect pending approvals
-        pending_res = await client.get("/approvals/pending", headers=headers_john)
+        pending_res = await client.get("/approvals/pending", headers=headers_elena)
         assert pending_res.status_code == 200
         pending_list = pending_res.json()["approvals"]
         assert any(p["thread_id"] == thread_id for p in pending_list)
@@ -165,7 +165,7 @@ async def test_approvals_api_lifecycle():
         assert decision_res.status_code == 200
         decision_data = decision_res.json()
         assert decision_data["status"] == "APPROVED_AND_EXECUTED"
-        assert decision_data["action"] == "open_release_valve"
+        assert decision_data["action"] == "adjust_governor"
         assert decision_data["audit_hash"] is not None
 
         # 4. Verify audit ledger entries
@@ -178,7 +178,7 @@ async def test_approvals_api_lifecycle():
 
         assert len(hitl_req_entries) > 0
         assert len(hitl_app_entries) > 0
-        assert "open_release_valve" in hitl_app_entries[0]["detail"]
+        assert "adjust_governor" in hitl_app_entries[0]["detail"]
         assert "approved" in hitl_app_entries[0]["detail"]
 
         # 5. Verify cryptographic hash chain integrity
@@ -222,20 +222,20 @@ async def test_approvals_self_approval_and_clearance_enforcement():
         token_suketu = res_suketu.json()["access_token"]
         headers_suketu = {"Authorization": f"Bearer {token_suketu}"}
 
-        # Scenario 1: John (L1) requests open_release_valve
+        # Scenario 1: Suketu (L3) requests open_release_valve
         q_res = await client.post(
             "/query",
             json={"text": "Open release valve on boiler-102 immediately", "has_image": False},
-            headers=headers_john,
+            headers=headers_suketu,
         )
         assert q_res.status_code == 200
         thread_id = q_res.json()["thread_id"]
 
-        # 1a. Self-approval attempt by John (L1) -> 403 Forbidden
+        # 1a. Self-approval attempt by Suketu (L3) -> 403 Forbidden
         self_app_res = await client.post(
             f"/approvals/{thread_id}/decision",
             json={"decision": "approve", "comment": "I approve my own request"},
-            headers=headers_john,
+            headers=headers_suketu,
         )
         assert self_app_res.status_code == 403
         assert "Self-approval forbidden" in self_app_res.json()["detail"]

@@ -169,7 +169,7 @@ async def test_query_stream_hitl_approval_interruption():
     token = create_access_token({
         "sub": "11111111-1111-1111-1111-111111111111",
         "email": "j.morrison@plant.internal",
-        "clearance_level": 1,
+        "clearance_level": 3,
         "role": "Maintenance_Engineer",
     })
 

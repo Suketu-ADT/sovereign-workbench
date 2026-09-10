@@ -152,11 +152,11 @@ async def test_fix_c_pending_approvals_visible_across_independent_connections():
     fresh, unpooled HTTP connection and resolves it without 404s.
     """
     transport = ASGITransport(app=app)
-    # Login Level 1 requestor
+    # Login Level 3 requestor
     token_requestor = create_access_token({
         "sub": str(uuid.uuid4()),
         "email": "operator.req@plant.internal",
-        "clearance_level": 1,
+        "clearance_level": 3,
         "role": "Maintenance_Engineer",
     })
     # Login Level 3 approver

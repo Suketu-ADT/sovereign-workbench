@@ -4,9 +4,13 @@ Orchestrates verified outputs from defense layers 1-6 (RBAC, Retrieval, Vision, 
 with static capability-map allowlist guardrails and LangGraph interrupt() execution for HITL approval.
 """
 
+import json
 import logging
 import uuid
 from typing import Any, TypedDict
+
+import httpx
+from pydantic import BaseModel, ValidationError
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
@@ -14,25 +18,45 @@ from langgraph.types import Command, interrupt
 
 from app.core.config import settings
 from app.schemas.query import HITLApprovalDetails
+from app.services import rbac_service
 
 logger = logging.getLogger(__name__)
 
-# Static tool & action allowlists (zero-hallucination guardrail)
-ALLOWLISTED_ACTIONS = {
-    "read_sensor",
-    "inspect_log",
-    "open_release_valve",
-    "adjust_governor",
-    "scram_containment",
+class PlannerOutput(BaseModel):
+    intent: str
+    required_tools: list[str]
+    proposed_action: str
+    requires_sensitive_approval: bool
+    reason: str
+
+STATIC_TOOL_REGISTRY = {
+    "retrieve_manual": {"description": "Search standard operating procedures", "sensitive": False, "authority": None},
+    "read_gauge": {"description": "Extract value from visual gauge image", "sensitive": False, "authority": None},
+    "calculate_pressure_drop": {"description": "Calculate difference between inlet and outlet", "sensitive": False, "authority": None},
+    "open_release_valve": {"description": "Open pressure release valve (SENSITIVE)", "sensitive": True, "authority": "Senior_Engineer (HITL Required)"},
+    "adjust_governor": {"description": "Adjust turbine governor (SENSITIVE)", "sensitive": True, "authority": "Operations_Lead (HITL Required)"},
+    "scram_containment": {"description": "Emergency shutdown (SENSITIVE)", "sensitive": True, "authority": "Plant_Director (HITL Required)"},
+    "emergency_shutdown": {"description": "Emergency shutdown (SENSITIVE)", "sensitive": True, "authority": "Plant_Director (HITL Required)"},
+    "override": {"description": "System override (SENSITIVE)", "sensitive": True, "authority": "Chief_Safety_Auditor (HITL Required)"},
+    "inspect_log": {"description": "Normal non-sensitive logging", "sensitive": False, "authority": None},
+    "none": {"description": "No action needed", "sensitive": False, "authority": None}
 }
 
-SENSITIVE_ACTIONS = {
-    "open_release_valve",
-    "adjust_governor",
-    "scram_containment",
-    "emergency_shutdown",
-    "override",
-}
+async def _call_llm_planner(prompt: str) -> dict:
+    if not settings.PLANNER_MODEL_ENABLED:
+        raise ValueError("Planner model is disabled")
+    
+    url = f"{settings.PLANNER_MODEL_URL}/api/generate"
+    payload = {
+        "model": settings.PLANNER_MODEL_NAME,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json"
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, timeout=settings.PLANNER_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
 
 # Authority string to minimum required clearance mapping
 AUTHORITY_CLEARANCE_MAP = {
@@ -71,39 +95,84 @@ class PlanState(TypedDict):
     final_synthesis: str | None
 
 
-def reasoning_node(state: PlanState) -> dict[str, Any]:
+async def reasoning_node(state: PlanState) -> dict[str, Any]:
     """
-    Reasoning layer: analyzes telemetry, document context, and calculates action.
-    Enforces allowlist guardrails.
+    Reasoning layer: analyzes telemetry, document context, and calculates action
+    by dynamically invoking an LLM (Qwen) with a strict tool registry.
     """
-    query = state["query"].lower()
+    query = state["query"]
     unit = state["unit"]
-    delta_p = state.get("pressure_drop") or 3.8
-    reading = state.get("vision_reading") or 6.4
+    delta_p = state.get("pressure_drop") or 0.0
+    reading = state.get("vision_reading") or 0.0
+    
+    tools_str = json.dumps(STATIC_TOOL_REGISTRY, indent=2)
+    
+    prompt = f"""You are an industrial reasoning agent. Determine the required tools and proposed action.
+    
+User Query: {query}
+Target Unit: {unit}
+Telemetry: Delta P = {delta_p} bar, Vision Reading = {reading} bar
 
-    # Determine if action is sensitive
-    needs_sensitive = any(
-        term in query
-        for term in ["valve", "open", "close", "shutdown", "override", "emergency"]
-    ) or (delta_p > 5.0)
+Available Tools:
+{tools_str}
 
-    if needs_sensitive:
-        action_name = "open_release_valve"
-        # Validate against hardcoded allowlist
-        if action_name not in ALLOWLISTED_ACTIONS:
-            raise ValueError(f"Action '{action_name}' rejected by capability guardrail allowlist")
-
-        target = f"{unit} (release valve #4)"
-        context = (
-            f"Δp = {delta_p} bar ({'exceeds 5.0 bar threshold' if delta_p > 5.0 else 'operational relief request'}). "
-            f"Recommended action: Open release valve on {unit} to prevent over-pressurization."
-        )
-        authority = "Senior_Engineer (HITL Required)"
-
+Output strictly valid JSON matching this schema:
+{{
+  "intent": "Short description of user intent",
+  "required_tools": ["tool1", "tool2"],
+  "proposed_action": "One action from the tools list",
+  "requires_sensitive_approval": true/false,
+  "reason": "Detailed reasoning"
+}}
+"""
+    try:
+        llm_response = await _call_llm_planner(prompt)
+        raw_output = llm_response.get("response", "{}")
+        parsed_json = json.loads(raw_output)
+        output = PlannerOutput(**parsed_json)
+    except ValidationError as e:
+        logger.error(f"Planner LLM output failed schema validation: {e}")
+        return {
+            "action_status": "ERROR",
+            "final_synthesis": "Planner error: invalid LLM output schema."
+        }
+    except Exception as e:
+        logger.error(f"Planner LLM failed or returned invalid output: {e}")
+        return {
+            "action_status": "ERROR",
+            "final_synthesis": f"Planner error: invalid LLM output ({e})"
+        }
+        
+    action_name = output.proposed_action
+    if action_name not in STATIC_TOOL_REGISTRY:
+        logger.error(f"Hallucinated action rejected: {action_name}")
+        return {
+            "action_status": "ERROR",
+            "final_synthesis": f"Planner proposed an unknown action: {action_name}"
+        }
+        
+    # Check deterministic capability from authoritative RBAC layer
+    # We pass 'action target' to let rbac_service check against the capability map
+    check_str = f"{action_name} {unit}"
+    allowed, req_level = rbac_service.check_access(check_str, state["clearance_level"])
+    
+    if not allowed:
+        logger.warning(f"Unauthorized action blocked: {action_name} for user clearance {state['clearance_level']}")
+        return {
+            "action_status": "REJECTED_UNAUTHORIZED",
+            "final_synthesis": f"Action '{action_name}' blocked. Requires Level {req_level} clearance."
+        }
+        
+    tool_info = STATIC_TOOL_REGISTRY[action_name]
+    if tool_info["sensitive"]:
+        target = f"{unit}"
+        context = output.reason
+        authority = tool_info["authority"]
+        
         approval_details = {
             "action": action_name,
             "target": target,
-            "requestor": f"AI Agent (Maintenance Subsystem for {unit})",
+            "requestor": f"AI Agent",
             "context": context,
             "authority": authority,
             "thread_id": state["thread_id"],
@@ -116,17 +185,12 @@ def reasoning_node(state: PlanState) -> dict[str, Any]:
             "final_synthesis": f"Sensitive actuator action '{action_name}' requested. Awaiting operator authorization.",
         }
 
-    # Non-sensitive operational diagnosis
-    action_name = "inspect_log"
     return {
         "proposed_action": {"action": action_name, "target": unit},
         "approval_required": False,
         "approval_details": None,
         "action_status": "NOT_REQUIRED",
-        "final_synthesis": (
-            f"Operational parameters for {unit} verified within nominal boundaries: "
-            f"measured {reading} bar, pressure drop {delta_p} bar. No emergency intervention required."
-        ),
+        "final_synthesis": f"Proposed action {action_name} does not require HITL. Reason: {output.reason}",
     }
 
 
