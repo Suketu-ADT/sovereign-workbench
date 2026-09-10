@@ -57,9 +57,9 @@ DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
     },
     "vision": {
         "provider": "local",
-        "model": getattr(settings, "VISION_MODEL_NAME", "qwen/qwen-2.5-vl-72b-instruct"),
-        "capabilities": ["image", "pdf", "vision", "ocr", "gauge", "telemetry"],
-        "description": "Qwen 2.5-VL multimodal dial gauge reading and OpenCV computer vision",
+        "model": "Qwen/Qwen2.5-VL-72B-Instruct",
+        "capabilities": ["image", "pdf", "vision", "ocr", "gauge", "telemetry", "diagram", "multimodal", "flowchart"],
+        "description": "Qwen 2.5-VL 72B multimodal visual analyst for diagrams, workflows, and industrial gauges",
         "sandboxed": False,
     },
     "calculation": {

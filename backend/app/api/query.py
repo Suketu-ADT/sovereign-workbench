@@ -53,6 +53,23 @@ async def get_active_models(
     }
 
 
+def is_gauge_query(query_text: str) -> bool:
+    """Determines whether visual query is targeting operational gauge reading vs diagram explanation."""
+    q = (query_text or "").lower().strip()
+    explanation_keywords = [
+        "explain", "describe", "what is", "diagram", "pipeline", "flowchart",
+        "architecture", "infographic", "overview", "summarize", "walkthrough", "stages", "steps", "chart",
+    ]
+    if any(w in q for w in explanation_keywords) and not any(p in q for p in ["gauge reading", "dial reading", "measure pressure", "gauge pressure"]):
+        return False
+
+    gauge_keywords = [
+        "gauge", "dial", "needle", "inlet", "outlet", "pressure", "vent",
+        "bar", "psi", "delta-p", "delta p", "drop", "reading", "value",
+    ]
+    return any(w in q for w in gauge_keywords) or not q
+
+
 @router.post(
     "/query",
     response_model=QueryResponse,
@@ -154,16 +171,25 @@ async def submit_query(
         unit = "reactor-core-aux"
     elif "turbine" in lower_text:
         unit = "turbine-gen-4"
+    elif has_image_requested and not is_gauge_query(body.text):
+        unit = "visual-asset"
     else:
         unit = "boiler-102"
 
-    # ── Step 5: Vision Extraction (multimodal gauge reading) ─
+    # ── Step 5: Vision Processing (multimodal asset analysis or dial gauge) ─
     vision_result = None
+    vision_analysis = None
     if has_image_requested:
-        vision_result = await vision_service.extract_gauge_reading(
-            image_data=body.image_data,
-            equipment_unit=unit,
-        )
+        if is_gauge_query(body.text):
+            vision_result = await vision_service.extract_gauge_reading(
+                image_data=body.image_data,
+                equipment_unit=unit,
+            )
+        else:
+            vision_analysis = await vision_service.analyze_visual_asset(
+                image_data=body.image_data,
+                prompt=body.text or "Explain what is shown in this image in detail.",
+            )
 
     # ── Step 6: Sandboxed Calculation (deterministic delta-p) ─
     calc_result = None
@@ -184,6 +210,8 @@ async def submit_query(
         retrieved_docs=[c.model_dump() for c in retrieved_chunks],
         vision_reading=vision_result.reading if (vision_result and vision_result.status == "success") else None,
         pressure_drop=calc_result.pressure_drop if calc_result else None,
+        vision_analysis=vision_analysis,
+        vision_explanation=vision_analysis.get("explanation") if vision_analysis else None,
     )
 
     is_awaiting_approval = bool(plan_result.get("approval_required"))
@@ -541,6 +569,8 @@ async def stream_query(
             unit = "reactor-core-aux"
         elif "turbine" in lower_text:
             unit = "turbine-gen-4"
+        elif has_image and not is_gauge_query(body.text):
+            unit = "visual-asset"
         else:
             unit = "boiler-102"
 
@@ -577,83 +607,129 @@ async def stream_query(
         })
         await asyncio.sleep(0.04)
 
-        # ── Step 5: Vision Extraction ─────────────────────────
+        # ── Step 5: Vision Processing (multimodal asset analysis or dial gauge) ─
         t_step = time.time()
         vision_result = None
+        vision_analysis = None
         if has_image:
-            yield _sse_event("step_start", {
-                "step": "vision",
-                "label": "Vision Extraction",
-                "desc": "Multimodal gauge reading",
-            })
-            vision_result = await vision_service.extract_gauge_reading(
-                image_data=body.image_data,
-                equipment_unit=unit,
-            )
-            elapsed = int((time.time() - t_step) * 1000)
-            if vision_result.status == "success":
-                async with async_session_factory() as db:
-                    async with audit_service.audit_transaction(db):
-                        await audit_service.append_entry(
-                            db=db,
-                            event_type="VISION_EXTRACTION",
-                            detail=(
-                                f"Extracted {vision_result.reading} {vision_result.unit} "
-                                f"({vision_result.parameter}, confidence {vision_result.confidence}) "
-                                f"— {vision_result.assessment}"
-                            ),
-                            actor_user_id=user_id,
-                        )
-                        await db.commit()
-                yield _sse_event("step_complete", {
+            is_gauge = is_gauge_query(body.text)
+            if is_gauge:
+                yield _sse_event("step_start", {
                     "step": "vision",
-                    "status": "passed",
-                    "readout": f"Gauge: {vision_result.reading} bar inlet | Confidence: {vision_result.confidence}",
-                    "vision": vision_result.model_dump(),
-                    "elapsed_ms": elapsed,
+                    "label": "Vision Extraction",
+                    "desc": "Multimodal gauge reading",
                 })
-            elif vision_result.status == "invalid_image":
-                async with async_session_factory() as db:
-                    async with audit_service.audit_transaction(db):
-                        await audit_service.append_entry(
-                            db=db,
-                            event_type="VISION_EXTRACTION",
-                            detail=f"Visual asset rejected: {vision_result.error} — {vision_result.assessment}",
-                            actor_user_id=user_id,
-                        )
-                        await db.commit()
-                yield _sse_event("step_complete", {
-                    "step": "vision",
-                    "status": "failed",
-                    "readout": f"Image rejected: {vision_result.error}",
-                    "vision": vision_result.model_dump(),
-                    "elapsed_ms": elapsed,
-                })
-            elif vision_result.status == "extraction_failed":
-                async with async_session_factory() as db:
-                    async with audit_service.audit_transaction(db):
-                        await audit_service.append_entry(
-                            db=db,
-                            event_type="VISION_EXTRACTION",
-                            detail=f"Extraction failed: {vision_result.error} — {vision_result.assessment}",
-                            actor_user_id=user_id,
-                        )
-                        await db.commit()
-                yield _sse_event("step_complete", {
-                    "step": "vision",
-                    "status": "failed",
-                    "readout": f"Extraction failed: {vision_result.error}",
-                    "vision": vision_result.model_dump(),
-                    "elapsed_ms": elapsed,
-                })
+                vision_result = await vision_service.extract_gauge_reading(
+                    image_data=body.image_data,
+                    equipment_unit=unit,
+                )
+                elapsed = int((time.time() - t_step) * 1000)
+                if vision_result.status == "success":
+                    async with async_session_factory() as db:
+                        async with audit_service.audit_transaction(db):
+                            await audit_service.append_entry(
+                                db=db,
+                                event_type="VISION_EXTRACTION",
+                                detail=(
+                                    f"Extracted {vision_result.reading} {vision_result.unit} "
+                                    f"({vision_result.parameter}, confidence {vision_result.confidence}) "
+                                    f"— {vision_result.assessment}"
+                                ),
+                                actor_user_id=user_id,
+                            )
+                            await db.commit()
+                    yield _sse_event("step_complete", {
+                        "step": "vision",
+                        "status": "passed",
+                        "readout": f"Gauge: {vision_result.reading} bar inlet | Confidence: {vision_result.confidence}",
+                        "vision": vision_result.model_dump(),
+                        "elapsed_ms": elapsed,
+                    })
+                elif vision_result.status == "invalid_image":
+                    async with async_session_factory() as db:
+                        async with audit_service.audit_transaction(db):
+                            await audit_service.append_entry(
+                                db=db,
+                                event_type="VISION_EXTRACTION",
+                                detail=f"Visual asset rejected: {vision_result.error} — {vision_result.assessment}",
+                                actor_user_id=user_id,
+                            )
+                            await db.commit()
+                    yield _sse_event("step_complete", {
+                        "step": "vision",
+                        "status": "failed",
+                        "readout": f"Image rejected: {vision_result.error}",
+                        "vision": vision_result.model_dump(),
+                        "elapsed_ms": elapsed,
+                    })
+                elif vision_result.status == "extraction_failed":
+                    async with async_session_factory() as db:
+                        async with audit_service.audit_transaction(db):
+                            await audit_service.append_entry(
+                                db=db,
+                                event_type="VISION_EXTRACTION",
+                                detail=f"Extraction failed: {vision_result.error} — {vision_result.assessment}",
+                                actor_user_id=user_id,
+                            )
+                            await db.commit()
+                    yield _sse_event("step_complete", {
+                        "step": "vision",
+                        "status": "failed",
+                        "readout": f"Extraction failed: {vision_result.error}",
+                        "vision": vision_result.model_dump(),
+                        "elapsed_ms": elapsed,
+                    })
+                else:
+                    yield _sse_event("step_complete", {
+                        "step": "vision",
+                        "status": "skipped",
+                        "readout": "No visual asset attached — skipped",
+                        "vision": vision_result.model_dump(),
+                        "elapsed_ms": elapsed,
+                    })
             else:
-                yield _sse_event("step_complete", {
+                # General Multimodal Visual Asset Analysis (Qwen2.5-VL)
+                yield _sse_event("step_start", {
                     "step": "vision",
-                    "status": "skipped",
-                    "readout": "No visual asset attached — skipped",
-                    "vision": vision_result.model_dump(),
-                    "elapsed_ms": elapsed,
+                    "label": "Multimodal Visual Analysis",
+                    "desc": "Qwen2.5-VL visual asset breakdown",
                 })
+                vision_analysis = await vision_service.analyze_visual_asset(
+                    image_data=body.image_data,
+                    prompt=body.text or "Explain what is shown in this image in detail.",
+                )
+                elapsed = int((time.time() - t_step) * 1000)
+                if vision_analysis.get("status") == "success":
+                    async with async_session_factory() as db:
+                        async with audit_service.audit_transaction(db):
+                            await audit_service.append_entry(
+                                db=db,
+                                event_type="VISION_ANALYSIS",
+                                detail="Multimodal visual analysis complete (Qwen2.5-VL-72B)",
+                                actor_user_id=user_id,
+                            )
+                            await db.commit()
+
+                    expl = vision_analysis.get("explanation") or ""
+                    first_line = next((line.strip("#* -") for line in expl.split("\n") if line.strip()), "Visual diagram analyzed")
+                    preview = (first_line[:75] + "...") if len(first_line) > 75 else first_line
+
+                    yield _sse_event("step_complete", {
+                        "step": "vision",
+                        "status": "passed",
+                        "readout": f"Multimodal analysis complete (Qwen2.5-VL) — {preview}",
+                        "vision_analysis": vision_analysis,
+                        "elapsed_ms": elapsed,
+                    })
+                else:
+                    err_msg = vision_analysis.get("error", "Failed to analyze visual asset")
+                    yield _sse_event("step_complete", {
+                        "step": "vision",
+                        "status": "failed",
+                        "readout": f"Visual analysis error: {err_msg}",
+                        "vision_analysis": vision_analysis,
+                        "elapsed_ms": elapsed,
+                    })
         else:
             yield _sse_event("step_complete", {
                 "step": "vision",
@@ -700,10 +776,15 @@ async def stream_query(
             })
         else:
             elapsed = int((time.time() - t_step) * 1000)
+            calc_msg = (
+                "Calculation skipped: visual asset is a conceptual diagram/workflow, not an operational pressure gauge"
+                if (has_image and not is_gauge_query(body.text))
+                else "Calculation skipped: no verified visual telemetry reading"
+            )
             yield _sse_event("step_complete", {
                 "step": "calculation",
                 "status": "skipped",
-                "readout": "Calculation skipped: no verified visual telemetry reading",
+                "readout": calc_msg,
                 "calculation": None,
                 "elapsed_ms": elapsed,
             })
@@ -725,6 +806,8 @@ async def stream_query(
             retrieved_docs=[c.model_dump() for c in retrieved_chunks],
             vision_reading=vision_result.reading if (vision_result and vision_result.status == "success") else None,
             pressure_drop=calc_result.pressure_drop if calc_result else None,
+            vision_analysis=vision_analysis,
+            vision_explanation=vision_analysis.get("explanation") if vision_analysis else None,
         )
 
         is_awaiting = bool(plan_result.get("approval_required"))
@@ -848,7 +931,7 @@ async def stream_query(
         yield _sse_event("complete", {
             "status": "completed",
             "retrieved_chunks": [c.model_dump() for c in retrieved_chunks],
-            "vision_analysis": vision_result.model_dump() if vision_result else None,
+            "vision_analysis": vision_result.model_dump() if vision_result else vision_analysis,
             "calculation_result": calc_result.model_dump() if calc_result else None,
             "approval_required": False,
             "thread_id": thread_id,

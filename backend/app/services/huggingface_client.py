@@ -71,13 +71,14 @@ def _sanitize(msg: str) -> str:
 
 def call_huggingface(
     model: str,
-    user_prompt: str,
+    user_prompt: str | list[dict],
     system_prompt: str = "You are a helpful AI assistant.",
-    timeout: float = 30.0,
+    timeout: float = 45.0,
 ) -> str:
     """
     Calls a model via Hugging Face Inference Providers OpenAI-compatible endpoint.
     Handles timeouts, connection retries, and sanitizes all error messages to ensure zero credential leakage.
+    Supports both text queries and multimodal content blocks.
     """
     active_client = get_client()
 
@@ -132,3 +133,26 @@ def call_huggingface(
         logger.error("Unexpected error in call_huggingface: %s", e)
         clean_msg = _sanitize(str(e))
         raise RuntimeError(f"Safe model inference failure: {clean_msg}") from None
+
+
+def call_huggingface_vision(
+    model: str,
+    prompt: str,
+    image_b64: str,
+    system_prompt: str = "You are an expert multimodal visual analyst.",
+    timeout: float = 45.0,
+) -> str:
+    """
+    Multimodal visual inference helper dispatching image + text prompt to vision-language models.
+    """
+    data_url = image_b64 if image_b64.startswith("data:") else f"data:image/png;base64,{image_b64}"
+    content_blocks = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]
+    return call_huggingface(
+        model=model,
+        user_prompt=content_blocks,
+        system_prompt=system_prompt,
+        timeout=timeout,
+    )

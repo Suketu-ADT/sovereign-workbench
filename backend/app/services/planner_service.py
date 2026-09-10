@@ -32,6 +32,7 @@ class PlannerOutput(BaseModel):
 STATIC_TOOL_REGISTRY = {
     "retrieve_manual": {"description": "Search standard operating procedures", "sensitive": False, "authority": None},
     "read_gauge": {"description": "Extract value from visual gauge image", "sensitive": False, "authority": None},
+    "analyze_visual_asset": {"description": "Analyze technical diagrams, flowcharts, architectures, and visual assets via multimodal VLM", "sensitive": False, "authority": None},
     "calculate_pressure_drop": {"description": "Calculate difference between inlet and outlet", "sensitive": False, "authority": None},
     "open_release_valve": {"description": "Open pressure release valve (SENSITIVE)", "sensitive": True, "authority": "Senior_Engineer (HITL Required)"},
     "adjust_governor": {"description": "Adjust turbine governor (SENSITIVE)", "sensitive": True, "authority": "Operations_Lead (HITL Required)"},
@@ -94,7 +95,11 @@ def _deterministic_planner_fallback(prompt: str) -> dict:
             action_name = "retrieve_manual"
             intent = "Retrieve standard operating procedure documentation"
             reason = "Consulting verified engineering specifications and operational limits."
-        elif any(w in user_query for w in ["gauge", "vision", "camera", "dial", "image", "reading"]):
+        elif any(w in user_query for w in ["explain", "describe", "what is", "diagram", "flowchart", "pipeline", "architecture", "infographic", "visual"]) or ("image" in user_query and not any(w in user_query for w in ["gauge", "dial", "needle", "bar"])):
+            action_name = "analyze_visual_asset"
+            intent = "Perform multimodal visual asset analysis"
+            reason = "Analyzing uploaded visual diagram, workflow, or technical asset."
+        elif any(w in user_query for w in ["gauge", "dial", "needle", "camera", "reading"]):
             action_name = "read_gauge"
             intent = "Inspect analog dial gauge reading via visual telemetry"
             reason = "Extracting gauge measurement from camera stream."
@@ -291,6 +296,8 @@ class PlanState(TypedDict):
     final_synthesis: str | None
     code_execution: dict[str, Any] | None
     model_routing: dict[str, Any] | None
+    vision_analysis: dict[str, Any] | None
+    vision_explanation: str | None
 
 
 async def reasoning_node(state: PlanState) -> dict[str, Any]:
@@ -404,6 +411,19 @@ Output strictly valid JSON matching this schema:
             }
         except Exception as e:
             logger.error("Coding workflow error in planner reasoning node: %s", e)
+
+    if action_name == "analyze_visual_asset" or state.get("vision_explanation"):
+        vis_expl = state.get("vision_explanation")
+        if not vis_expl and state.get("vision_analysis"):
+            vis_expl = (state.get("vision_analysis") or {}).get("explanation")
+        synth = vis_expl or f"Multimodal visual analysis complete: {output.reason}"
+        return {
+            "proposed_action": {"action": "analyze_visual_asset", "target": unit},
+            "approval_required": False,
+            "approval_details": None,
+            "action_status": "COMPLETED",
+            "final_synthesis": synth,
+        }
 
     return {
         "proposed_action": {"action": action_name, "target": unit},
@@ -565,6 +585,8 @@ class PlannerService:
         vision_reading: float | None = None,
         pressure_drop: float | None = None,
         thread_id: str | None = None,
+        vision_analysis: dict[str, Any] | None = None,
+        vision_explanation: str | None = None,
     ) -> dict[str, Any]:
         """
         Executes the reasoning loop. If a sensitive action is proposed,
@@ -587,6 +609,8 @@ class PlannerService:
             "approval_decision": None,
             "action_status": "PENDING",
             "final_synthesis": None,
+            "vision_analysis": vision_analysis,
+            "vision_explanation": vision_explanation,
         }
 
         config = {"configurable": {"thread_id": tid}}
