@@ -842,6 +842,9 @@ async def stream_query(
         })
 
         # ── Complete Event ────────────────────────────────────
+        code_exec = plan_result.get("code_execution") or {}
+        code_str = code_exec.get("code")
+        output_str = code_exec.get("output")
         yield _sse_event("complete", {
             "status": "completed",
             "retrieved_chunks": [c.model_dump() for c in retrieved_chunks],
@@ -850,6 +853,9 @@ async def stream_query(
             "approval_required": False,
             "thread_id": thread_id,
             "final_synthesis": plan_result.get("synthesis"),
+            "code": code_str,
+            "execution_result": output_str,
+            "code_execution": code_exec if code_str else None,
             "model_routing": routing,
             "audit_entry": audit_payload,
             "total_elapsed_ms": int((time.time() - t0) * 1000),

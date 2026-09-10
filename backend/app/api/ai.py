@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.session import async_session_factory, get_db
 from app.services import audit_service, prompt_guard
+from app.services.code_sandbox_service import code_sandbox_service
 from app.services.coding_agent_service import coding_agent_service
 from app.services.model_provider import get_provider
 from app.services.model_router import classify_task, route_request, select_model
@@ -310,3 +311,31 @@ async def ai_query(
         latency_ms=elapsed_ms,
         request_id=req_id,
     )
+
+
+class CodeRunRequest(BaseModel):
+    code: str = Field(..., min_length=1, description="Python code to execute")
+
+
+@router.post("/sandbox/run", summary="Execute code snippet in isolated sandbox")
+async def run_sandbox_code(body: CodeRunRequest):
+    """
+    Executes Python code snippet directly in the isolated Docker sandbox
+    (with restricted runner fallback).
+    """
+    code_text = body.code.strip()
+    if not code_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Code snippet cannot be empty",
+        )
+
+    exec_result = await code_sandbox_service.execute_code(code_text)
+    return {
+        "status": exec_result.get("status", "success"),
+        "stdout": exec_result.get("stdout", "").strip(),
+        "stderr": exec_result.get("stderr", "").strip(),
+        "exit_code": exec_result.get("exit_code", 0),
+        "sandbox_type": exec_result.get("sandbox_type", "isolated_sandbox"),
+    }
+

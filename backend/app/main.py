@@ -146,3 +146,13 @@ async def health(response: Response):
         "database": db_status,
         "prompt_guard_llm_status": llm_status,
     }
+
+
+# ── Static Frontend UI (Local Dev & Production) ───────────────
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+if (ROOT_DIR / "index.html").exists():
+    app.mount("/", StaticFiles(directory=str(ROOT_DIR), html=True), name="static_root")
+

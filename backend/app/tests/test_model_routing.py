@@ -206,3 +206,11 @@ async def test_api_models_status_and_query():
         }
         blocked_resp = await ac.post("/api/ai/query", json=adversarial_payload)
         assert blocked_resp.status_code in (400, 403)
+
+        # Test /api/sandbox/run endpoint for interactive execution
+        sandbox_resp = await ac.post("/api/sandbox/run", json={"code": "print('Pump Efficiency = 85.0 %')"})
+        assert sandbox_resp.status_code == 200
+        sb_data = sandbox_resp.json()
+        assert sb_data["status"] == "success"
+        assert "85.0" in sb_data["stdout"]
+

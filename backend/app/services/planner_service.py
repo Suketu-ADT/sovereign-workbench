@@ -459,6 +459,7 @@ def action_execution_node(state: PlanState) -> dict[str, Any]:
     return {
         "action_status": status,
         "final_synthesis": synthesis,
+        "code_execution": state.get("code_execution"),
     }
 
 
@@ -618,6 +619,7 @@ class PlannerService:
             "approval_details": None,
             "action_status": result.get("action_status"),
             "synthesis": result.get("final_synthesis"),
+            "code_execution": result.get("code_execution"),
         }
 
     async def resume_plan(
