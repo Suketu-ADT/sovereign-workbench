@@ -32,7 +32,7 @@ class RetrievedChunk(BaseModel):
 
 
 class VisionResult(BaseModel):
-    status: str = "success"  # "success", "skipped", "invalid_image"
+    status: str = "success"  # "success", "skipped", "invalid_image", "extraction_failed"
     reading: float | None = None
     unit: str = "bar"
     parameter: str = "inlet_pressure"
@@ -87,3 +87,4 @@ class QueryResponse(BaseModel):
     approval_details: HITLApprovalDetails | None = None
     thread_id: str | None = None
     final_synthesis: str | None = None
+    model_routing: dict | None = None

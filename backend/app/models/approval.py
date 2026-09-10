@@ -6,17 +6,18 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, JSON, String, Uuid
+from sqlalchemy import DateTime, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.db.types import GUID
 
 
 class PendingApproval(Base):
     __tablename__ = "pending_approvals"
 
     thread_id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    requestor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    requestor_user_id: Mapped[uuid.UUID] = mapped_column(GUID, nullable=False)
     operator_email: Mapped[str] = mapped_column(String(254), nullable=False)
     clearance_level: Mapped[int] = mapped_column(Integer, nullable=False)
     unit: Mapped[str] = mapped_column(String(100), nullable=False)

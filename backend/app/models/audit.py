@@ -9,10 +9,11 @@ a second line of defense (Postgres only — see migration).
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text, Uuid
+from sqlalchemy import BigInteger, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.db.types import GUID
 
 
 class AuditEntry(Base):
@@ -30,7 +31,7 @@ class AuditEntry(Base):
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     detail: Mapped[str] = mapped_column(Text, nullable=False, default="")
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, nullable=True
+        GUID, nullable=True
     )
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     hash: Mapped[str] = mapped_column(String(64), nullable=False)

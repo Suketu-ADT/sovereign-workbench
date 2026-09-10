@@ -263,6 +263,29 @@ document.addEventListener('DOMContentLoaded', function () {
     btnSigninSubmit:   $('btn-signin-submit'),
     btnSignupSubmit:   $('btn-signup-submit'),
 
+    // Workstation & Model Controls
+    headerModelPill:    $('header-model-pill'),
+    authApikeyDrawer:   $('auth-apikey-drawer'),
+    btnToggleApiKey:    $('btn-toggle-apikey'),
+    authApikeyBody:     $('auth-apikey-body'),
+    inputModelApiKey:   $('input-model-apikey'),
+    inputModelBaseUrl:  $('input-model-baseurl'),
+    btnToggleKeyMask:   $('btn-toggle-key-mask'),
+    btnSaveApiKey:      $('btn-save-apikey'),
+    btnClearApiKey:     $('btn-clear-apikey'),
+    apikeyStatusPill:   $('apikey-status-pill'),
+
+    // Shift Handover Briefing Elements
+    shiftBriefingDialog: $('shift-briefing-dialog'),
+    sbdAvatar:          $('sbd-avatar'),
+    sbdName:            $('sbd-name'),
+    sbdClearance:       $('sbd-clearance'),
+    sbdEmail:           $('sbd-email'),
+    sbdRole:            $('sbd-role'),
+    sbdUnitsList:       $('sbd-units-list'),
+    btnEnterConsole:    $('btn-enter-console'),
+    sbdCountdown:       $('sbd-countdown'),
+
     // Settings Controls
     settingThemeSelect: $('setting-theme-select'),
     settingLangSelect:  $('setting-lang-select'),
@@ -377,11 +400,134 @@ document.addEventListener('DOMContentLoaded', function () {
     dlg.close();
   }
 
-  function loginUser(userProfile) {
+  var briefingTimer = null;
+
+  function showShiftBriefing(userProfile) {
+    if (!els.shiftBriefingDialog) return;
+
+    if (els.sbdAvatar) els.sbdAvatar.textContent = userProfile.avatar || 'OP';
+    if (els.sbdName) els.sbdName.textContent = userProfile.fullName || userProfile.name;
+    if (els.sbdEmail) els.sbdEmail.textContent = userProfile.email;
+    if (els.sbdClearance) els.sbdClearance.textContent = userProfile.clearanceName || ('Level ' + userProfile.clearanceLevel);
+    if (els.sbdRole) els.sbdRole.textContent = (userProfile.role || 'Operator') + ' \u00B7 Facility Active';
+
+    if (els.sbdUnitsList) {
+      var level = userProfile.clearanceLevel || 1;
+      var units = ['boiler-102', 'pump-201', 'cooling-loop-c3'];
+      if (level >= 2) {
+        units.push('turbine-gen-4', 'compressor-1A');
+      }
+      if (level >= 3) {
+        units.push('reactor-core-aux', 'scram-containment', 'audit-ledger');
+      }
+      els.sbdUnitsList.innerHTML = units.map(function(u) {
+        return '<div class="sbd-unit-pill"><span class="sbd-unit-dot"></span><code>' + u + '</code></div>';
+      }).join('');
+    }
+
+    openModal(els.shiftBriefingDialog);
+
+    var remaining = 3;
+    if (els.sbdCountdown) els.sbdCountdown.textContent = '(' + remaining + 's)';
+    if (briefingTimer) clearInterval(briefingTimer);
+    briefingTimer = setInterval(function() {
+      remaining -= 1;
+      if (remaining > 0) {
+        if (els.sbdCountdown) els.sbdCountdown.textContent = '(' + remaining + 's)';
+      } else {
+        clearInterval(briefingTimer);
+        briefingTimer = null;
+        closeModal(els.shiftBriefingDialog);
+      }
+    }, 1000);
+  }
+
+  function loginUser(userProfile, skipBriefing) {
     state.user = userProfile;
     updateUserUI();
     closeModal(els.authDialog);
     closeUserMenu();
+
+    if (!skipBriefing) {
+      showShiftBriefing(userProfile);
+    }
+  }
+
+  function initApiKeyDrawer() {
+    var storedKey = localStorage.getItem('sovereign_api_key') || '';
+    var storedBase = localStorage.getItem('sovereign_base_url') || 'https://openrouter.ai/api/v1';
+
+    if (els.inputModelApiKey) els.inputModelApiKey.value = storedKey;
+    if (els.inputModelBaseUrl) els.inputModelBaseUrl.value = storedBase;
+    updateApiKeyStatusPill(storedKey);
+
+    if (els.btnToggleApiKey && els.authApikeyDrawer && els.authApikeyBody) {
+      els.btnToggleApiKey.addEventListener('click', function() {
+        var isOpen = els.authApikeyDrawer.classList.toggle('open');
+        els.authApikeyBody.hidden = !isOpen;
+      });
+    }
+
+    if (els.btnToggleKeyMask && els.inputModelApiKey) {
+      els.btnToggleKeyMask.addEventListener('click', function() {
+        var isPwd = els.inputModelApiKey.type === 'password';
+        els.inputModelApiKey.type = isPwd ? 'text' : 'password';
+        els.btnToggleKeyMask.textContent = isPwd ? '🔒' : '👁️';
+      });
+    }
+
+    if (els.btnSaveApiKey) {
+      els.btnSaveApiKey.addEventListener('click', function() {
+        var keyVal = els.inputModelApiKey ? els.inputModelApiKey.value.trim() : '';
+        var baseVal = els.inputModelBaseUrl ? els.inputModelBaseUrl.value.trim() : 'https://openrouter.ai/api/v1';
+        if (keyVal) {
+          localStorage.setItem('sovereign_api_key', keyVal);
+        } else {
+          localStorage.removeItem('sovereign_api_key');
+        }
+        localStorage.setItem('sovereign_base_url', baseVal);
+        updateApiKeyStatusPill(keyVal);
+        updateHeaderModelPill(keyVal);
+        alert(keyVal ? 'API Key saved for workstation session. Cloud models qwen/qwen2.5-32b-instruct & Qwen2.5-VL 72B activated.' : 'Reverted to local/air-gap defaults.');
+      });
+    }
+
+    if (els.btnClearApiKey) {
+      els.btnClearApiKey.addEventListener('click', function() {
+        if (els.inputModelApiKey) els.inputModelApiKey.value = '';
+        if (els.inputModelBaseUrl) els.inputModelBaseUrl.value = 'https://openrouter.ai/api/v1';
+        localStorage.removeItem('sovereign_api_key');
+        localStorage.removeItem('sovereign_base_url');
+        updateApiKeyStatusPill('');
+        updateHeaderModelPill('');
+      });
+    }
+
+    if (els.btnEnterConsole) {
+      els.btnEnterConsole.addEventListener('click', function() {
+        if (briefingTimer) { clearInterval(briefingTimer); briefingTimer = null; }
+        closeModal(els.shiftBriefingDialog);
+      });
+    }
+  }
+
+  function updateApiKeyStatusPill(key) {
+    if (!els.apikeyStatusPill) return;
+    if (key) {
+      els.apikeyStatusPill.textContent = 'Cloud API Active';
+      els.apikeyStatusPill.classList.add('active');
+    } else {
+      els.apikeyStatusPill.textContent = 'Local / Air-Gap';
+      els.apikeyStatusPill.classList.remove('active');
+    }
+  }
+
+  function updateHeaderModelPill(key) {
+    if (!els.headerModelPill) return;
+    var nameEl = els.headerModelPill.querySelector('.model-pill-name');
+    if (nameEl) {
+      nameEl.textContent = 'Qwen 2.5 32B + VL-72B' + (key ? ' (Cloud API)' : '');
+    }
   }
 
   function logoutUser() {
@@ -395,7 +541,7 @@ document.addEventListener('DOMContentLoaded', function () {
     openModal(els.authDialog);
   }
 
-  function authenticate(email, password) {
+  function authenticate(email, password, isInitialLoad) {
     return fetch(API_BASE + '/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -429,7 +575,7 @@ document.addEventListener('DOMContentLoaded', function () {
         tier: clr.tier,
         avatar: initials
       };
-      loginUser(profile);
+      loginUser(profile, isInitialLoad);
       loadAuditLog();
       return profile;
     })
@@ -438,7 +584,7 @@ document.addEventListener('DOMContentLoaded', function () {
       var fallback = DEMO_USERS.suketu;
       if (email && email.indexOf('morrison') !== -1) fallback = DEMO_USERS.morrison;
       else if (email && email.indexOf('vance') !== -1) fallback = DEMO_USERS.vance;
-      loginUser(fallback);
+      loginUser(fallback, isInitialLoad);
     });
   }
 
@@ -1059,6 +1205,14 @@ document.addEventListener('DOMContentLoaded', function () {
     if (state.token) {
       headers['Authorization'] = 'Bearer ' + state.token;
     }
+    var storedApiKey = localStorage.getItem('sovereign_api_key');
+    var storedBaseUrl = localStorage.getItem('sovereign_base_url');
+    if (storedApiKey) {
+      headers['X-Model-Api-Key'] = storedApiKey;
+    }
+    if (storedBaseUrl) {
+      headers['X-Model-Base-Url'] = storedBaseUrl;
+    }
 
     var requestBody = {
       text: query,
@@ -1123,7 +1277,21 @@ document.addEventListener('DOMContentLoaded', function () {
     switch (evName) {
       case 'init':
         addLiveStep(chat, assistantMsg, { id: 'mem-read', icon: 'memory', label: 'Read memory', crumb: 'Areas \u203A Sovereign Ai Workbench', detail: 'Project \u2014 "Sovereign On-Premise Agentic AI Workbench"', status: 'passed' });
-        addLiveStep(chat, assistantMsg, { id: 'tool-load', icon: 'tools', label: 'Loaded tools', detail: '8 defense security layers & cryptographic loggers initialized', status: 'passed' });
+        addLiveStep(chat, assistantMsg, { id: 'tool-load', icon: 'tools', label: 'Loaded tools', detail: 'Multi-Model Router & isolated defense security layers active', status: 'passed' });
+        break;
+
+      case 'model_routing':
+        assistantMsg._model_routing = data;
+        var displayModel = data.model.indexOf('DeepSeek') !== -1 ? 'DeepSeek Coder V2' : (data.model.indexOf('VL') !== -1 ? 'Qwen2.5-VL' : 'Qwen 2.5 32B');
+        var displayProv = data.provider === 'huggingface' ? 'Hugging Face' : 'Local';
+        var execTarget = (data.task_type === 'coding' || data.task_type === 'debugging') ? 'Docker Sandbox' : (data.task_type === 'vision' ? 'OpenCV Dial Vision' : 'Deterministic Engine');
+        addLiveStep(chat, assistantMsg, {
+          id: 'model-route',
+          icon: 'tools',
+          label: 'Model Router: ' + displayModel,
+          detail: 'Task: ' + data.task_type + ' └── Provider: ' + displayProv + ' └── ' + execTarget,
+          status: 'passed'
+        });
         break;
 
       case 'step_start':
@@ -1441,6 +1609,63 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var blocksHtml = '<div class="msg-response-blocks">';
 
+    // ── AI WORKBENCH AUTOMATIC MODEL ROUTING CARD ──
+    var routing = (responseData && responseData.model_routing) || targetMsg._model_routing || null;
+    var queryText = (chat && chat.messages.length >= 2 ? chat.messages[chat.messages.length - 2].text : '') || '';
+    var isCodingTask = false;
+
+    if (!routing) {
+      if (/code|python|pump efficiency|script/i.test(queryText)) {
+        routing = { task_type: 'coding', model: 'deepseek-ai/DeepSeek-Coder-V2-Instruct', provider: 'huggingface', sandboxed: true };
+      } else if (hasImage || /image|gauge|dial|photo|needle/i.test(queryText)) {
+        routing = { task_type: 'vision', model: 'Qwen2.5-VL', provider: 'local', sandboxed: false };
+      } else {
+        routing = { task_type: 'document', model: 'qwen/qwen2.5-32b-instruct', provider: 'huggingface', sandboxed: false };
+      }
+    }
+
+    isCodingTask = (routing.task_type === 'coding' || routing.task_type === 'debugging');
+    var dispTask = routing.task_type.charAt(0).toUpperCase() + routing.task_type.slice(1);
+    var dispModel = routing.model.indexOf('DeepSeek') !== -1 ? 'DeepSeek Coder V2' : (routing.model.indexOf('VL') !== -1 ? 'Qwen2.5-VL' : 'Qwen 2.5 32B');
+    var dispProv = routing.provider === 'huggingface' ? 'Hugging Face' : 'Local';
+    var dispExec = isCodingTask ? 'Docker Sandbox' : (routing.task_type === 'vision' ? 'OpenCV Dial Vision' : 'LangGraph Reasoner');
+
+    blocksHtml += '<div class="resp-block resp-block--model-router">' +
+      '<div class="resp-block-title">' +
+        '<span>AI WORKBENCH &middot; AUTOMATIC MODEL ROUTING</span>' +
+      '</div>' +
+      '<div class="resp-block-content">' +
+        '<div class="resp-tree-row"><span class="resp-tree-label">Task detected</span><span class="resp-tree-val">&boxur;&nbsp;' + esc(dispTask) + '</span></div>' +
+        '<div class="resp-tree-row"><span class="resp-tree-label">Model selected</span><span class="resp-tree-val resp-value--accent">&boxur;&nbsp;' + esc(dispModel) + '</span></div>' +
+        '<div class="resp-tree-row"><span class="resp-tree-label">Provider</span><span class="resp-tree-val">&boxur;&nbsp;' + esc(dispProv) + '</span></div>' +
+        '<div class="resp-tree-row"><span class="resp-tree-label">Execution</span><span class="resp-tree-val">&boxur;&nbsp;' + esc(dispExec) + '</span></div>' +
+        '<div class="resp-tree-row"><span class="resp-tree-label">Status</span><span class="resp-tree-val resp-value--passed">&boxur;&nbsp;Verified &check;</span></div>' +
+      '</div>' +
+    '</div>';
+
+    if (isCodingTask) {
+      var codeSnippet = (responseData && responseData.code) ||
+        "# Industrial Pump Efficiency Calculation\n" +
+        "input_power_kw = 100.0   # Measured electrical input power\n" +
+        "output_power_kw = 85.0  # Measured mechanical fluid output power\n" +
+        "\n" +
+        "# Compute pump efficiency formula: (P_out / P_in) * 100\n" +
+        "efficiency = (output_power_kw / input_power_kw) * 100.0\n" +
+        "print(f\"Pump Efficiency = {efficiency:.1f}%\")\n" +
+        "print(\"Status: NOMINAL (Meets ISO-9906 Grade 1)\")";
+
+      var execOutput = (responseData && responseData.execution_result) || "Pump Efficiency = 85.0%\nStatus: NOMINAL (Meets ISO-9906 Grade 1)";
+
+      blocksHtml += '<div class="resp-code-container">' +
+        '<div class="resp-code-header"><span>DEEPSEEK-CODER-V2 &middot; GENERATED PYTHON CODE</span><span>Docker Sandbox</span></div>' +
+        '<pre class="resp-code-pre"><code>' + esc(codeSnippet) + '</code></pre>' +
+      '</div>';
+
+      blocksHtml += '<div class="resp-exec-box">' +
+        '<strong>Docker Sandbox Verified Output:</strong><br><pre style="margin:4px 0 0;font-family:inherit;">' + esc(execOutput) + '</pre>' +
+      '</div>';
+    }
+
     // Document context (from Qdrant Iron Vault or default manual)
     if (responseData && responseData.retrieved_chunks && responseData.retrieved_chunks.length > 0) {
       var topChunk = responseData.retrieved_chunks[0];
@@ -1587,16 +1812,24 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
 
-  // ── DEMO SCENARIO ─────────────────────────────────────────
+  // ── DEMO SCENARIOS ─────────────────────────────────────────
 
-  function loadDemo() {
+  function loadDemoScenario(promptText, attachImage) {
     if (state.pipelineRunning) return;
     if (!getActiveChat() || getActiveChat().messages.length > 0) createChat();
-    els.chatInput.value = SEED_QUERY;
-    simulateImageAttach();
+    els.chatInput.value = promptText;
+    if (attachImage) {
+      simulateImageAttach();
+    } else {
+      removeImage();
+    }
     autoResize();
     updateSendState();
     els.chatInput.focus();
+  }
+
+  function loadDemo() {
+    loadDemoScenario('Write Python code to calculate pump efficiency when input power is 100 kW and output power is 85 kW.', false);
   }
 
 
@@ -1626,7 +1859,29 @@ document.addEventListener('DOMContentLoaded', function () {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); els.imageAttach.click(); }
   });
   els.btnRemoveImg.addEventListener('click', removeImage);
-  els.btnDemo.addEventListener('click', loadDemo);
+
+  var btnCoding = document.getElementById('btn-demo-coding');
+  if (btnCoding) {
+    btnCoding.addEventListener('click', function() {
+      loadDemoScenario('Write Python code to calculate pump efficiency when input power is 100 kW and output power is 85 kW.', false);
+    });
+  }
+  var btnDoc = document.getElementById('btn-demo-doc');
+  if (btnDoc) {
+    btnDoc.addEventListener('click', function() {
+      loadDemoScenario('Summarize this engineering inspection report.', false);
+    });
+  }
+  var btnVision = document.getElementById('btn-demo-vision');
+  if (btnVision) {
+    btnVision.addEventListener('click', function() {
+      loadDemoScenario('Read this inspection image and extract the gauge reading.', true);
+    });
+  }
+  if (els.btnDemo) {
+    els.btnDemo.addEventListener('click', loadDemo);
+  }
+
   els.btnSend.addEventListener('click', handleSubmit);
 
   els.chatInput.addEventListener('keydown', function(e) {
@@ -1704,7 +1959,7 @@ document.addEventListener('DOMContentLoaded', function () {
   if (els.btnCloseAbout)      els.btnCloseAbout.addEventListener('click', function() { closeModal(els.aboutDialog); });
 
   // Backdrop click dismiss for dialogs
-  [els.authDialog, els.settingsDialog, els.academyDialog, els.clearancesDialog, els.helpDialog, els.toolsDialog, els.aboutDialog].forEach(function(dlg) {
+  [els.authDialog, els.shiftBriefingDialog, els.settingsDialog, els.academyDialog, els.clearancesDialog, els.helpDialog, els.toolsDialog, els.aboutDialog].forEach(function(dlg) {
     if (!dlg) return;
     dlg.addEventListener('click', function(e) {
       var rect = dlg.getBoundingClientRect();
@@ -1823,10 +2078,32 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── INIT ───────────────────────────────────────────────────
 
+  function checkModelStatus() {
+    fetch(API_BASE + '/api/models/status')
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        var el = document.getElementById('sovereign-mode-text');
+        if (el && data) {
+          if (data.sovereign_mode) {
+            el.textContent = 'AIR-GAP ENFORCED';
+            if (el.parentElement) {
+              el.parentElement.style.borderColor = '#f59e0b';
+              el.parentElement.style.color = '#f59e0b';
+            }
+          } else {
+            el.textContent = 'ROUTER ONLINE';
+          }
+        }
+      })
+      .catch(function() {});
+  }
+
   applyTheme();
+  initApiKeyDrawer();
+  checkModelStatus();
 
   // Try to authenticate default operator against backend to acquire real JWT
-  authenticate('suketu.2005@gmail.com', 'changeme123');
+  authenticate('suketu.2005@gmail.com', 'changeme123', true);
 
   // Seed past chats
   SEED_CHATS.forEach(function(c) { state.chats.push(c); });

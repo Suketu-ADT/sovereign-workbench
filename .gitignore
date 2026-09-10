@@ -26,9 +26,11 @@ data/
 
 # Environment Secrets
 .env
+.env.*
 *.env
 !.env.example
 backend/.env
+backend/.env.*
 !backend/.env.example
 
 # Docker Volumes

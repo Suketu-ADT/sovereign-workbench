@@ -12,9 +12,10 @@ Each step writes an audit_log entry via the centralized audit service.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.approval import PendingApproval
@@ -29,11 +30,27 @@ from app.services import (
     retrieval_service,
     vision_service,
 )
+from app.services.model_router import route_request
 
 
 
 
 router = APIRouter(tags=["Query"])
+
+
+@router.get(
+    "/query/models",
+    summary="Get active inference models and API status",
+)
+async def get_active_models(
+    current_user: dict = Depends(get_current_user),
+):
+    return {
+        "planner_model": settings.PLANNER_MODEL_NAME,
+        "vision_model": settings.VISION_MODEL_NAME,
+        "has_api_key": bool(settings.LLM_API_KEY),
+        "base_url": settings.LLM_BASE_URL,
+    }
 
 
 @router.post(
@@ -45,9 +62,18 @@ async def submit_query(
     body: QueryRequest,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    x_model_api_key: str | None = Header(None, alias="X-Model-Api-Key"),
+    x_model_base_url: str | None = Header(None, alias="X-Model-Base-Url"),
 ):
+    if x_model_api_key:
+        settings.LLM_API_KEY = x_model_api_key
+    if x_model_base_url:
+        settings.LLM_BASE_URL = x_model_base_url
+
     user_id = uuid.UUID(current_user["sub"])
     clearance = current_user["clearance_level"]
+    has_image_requested = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
+    routing = route_request(body.text, has_image=has_image_requested)
 
     # ── Step 1: Rate limit check ──────────────────────────────
     allowed, retry_after = rate_limiter.check_rate_limit(user_id)
@@ -132,7 +158,6 @@ async def submit_query(
         unit = "boiler-102"
 
     # ── Step 5: Vision Extraction (multimodal gauge reading) ─
-    has_image_requested = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
     vision_result = None
     if has_image_requested:
         vision_result = await vision_service.extract_gauge_reading(
@@ -203,6 +228,8 @@ async def submit_query(
                 )
             elif vision_result.status == "invalid_image":
                 audit_vis_detail = f"Visual asset rejected: {vision_result.error} — {vision_result.assessment}"
+            elif vision_result.status == "extraction_failed":
+                audit_vis_detail = f"Extraction failed: {vision_result.error} — {vision_result.assessment}"
             else:
                 audit_vis_detail = "No visual asset attached — skipped"
 
@@ -272,6 +299,8 @@ async def submit_query(
                 detail_items.append(f"gauge: {vision_result.reading} bar")
             elif vision_result.status == "invalid_image":
                 detail_items.append(f"gauge: rejected ({vision_result.error})")
+            elif vision_result.status == "extraction_failed":
+                detail_items.append(f"gauge: extraction failed ({vision_result.error})")
         if calc_result:
             detail_items.append(f"delta-p: {calc_result.pressure_drop} bar")
         await audit_service.append_entry(
@@ -299,6 +328,8 @@ async def submit_query(
                 note_parts.append(f"vision reading: {vision_result.reading} bar")
             elif vision_result.status == "invalid_image":
                 note_parts.append(f"vision error: {vision_result.error}")
+            elif vision_result.status == "extraction_failed":
+                note_parts.append(f"vision extraction failed: {vision_result.error}")
         if calc_result:
             note_parts.append(f"calculated delta-p: {calc_result.pressure_drop} bar ({calc_result.status})")
         response_note = ", ".join(note_parts)
@@ -313,6 +344,7 @@ async def submit_query(
         approval_details=approval_details_obj,
         thread_id=thread_id,
         final_synthesis=plan_result.get("synthesis"),
+        model_routing=routing,
     )
 
 
@@ -336,24 +368,31 @@ def _sse_event(event_type: str, data: dict) -> str:
 async def stream_query(
     body: QueryRequest,
     current_user: dict = Depends(get_current_user),
+    x_model_api_key: str | None = Header(None, alias="X-Model-Api-Key"),
+    x_model_base_url: str | None = Header(None, alias="X-Model-Base-Url"),
 ):
     """
     Executes the 8-stage defense pipeline progressively, yielding SSE messages
     for each layer (rate limit, prompt safety, RBAC, retrieval, vision, calculation,
     planner HITL gate, and hash-chain audit write).
     """
+    if x_model_api_key:
+        settings.LLM_API_KEY = x_model_api_key
+    if x_model_base_url:
+        settings.LLM_BASE_URL = x_model_base_url
 
     async def event_generator():
         t0 = time.time()
         user_id = uuid.UUID(current_user["sub"])
         clearance = current_user["clearance_level"]
         operator_email = current_user.get("email", "")
+        has_image = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
 
         yield _sse_event("init", {
             "query": body.text,
             "clearance": clearance,
             "user": operator_email,
-            "has_image": body.has_image or bool(body.image_data),
+            "has_image": has_image,
         })
         await asyncio.sleep(0.04)
 
@@ -428,6 +467,17 @@ async def stream_query(
             "status": "passed",
             "readout": "0 injection patterns detected — CLEAR",
             "elapsed_ms": elapsed,
+        })
+        await asyncio.sleep(0.04)
+
+        # ── Step 2b: Dynamic Model Routing & Task Classification ──
+        routing = route_request(body.text, has_image=has_image)
+        yield _sse_event("model_routing", {
+            "task_type": routing["task_type"],
+            "provider": routing["provider"],
+            "model": routing["model"],
+            "sandboxed": routing.get("sandboxed", False),
+            "sovereign_mode": settings.SOVEREIGN_MODE,
         })
         await asyncio.sleep(0.04)
 
@@ -529,7 +579,6 @@ async def stream_query(
 
         # ── Step 5: Vision Extraction ─────────────────────────
         t_step = time.time()
-        has_image = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
         vision_result = None
         if has_image:
             yield _sse_event("step_start", {
@@ -577,6 +626,23 @@ async def stream_query(
                     "step": "vision",
                     "status": "failed",
                     "readout": f"Image rejected: {vision_result.error}",
+                    "vision": vision_result.model_dump(),
+                    "elapsed_ms": elapsed,
+                })
+            elif vision_result.status == "extraction_failed":
+                async with async_session_factory() as db:
+                    async with audit_service.audit_transaction(db):
+                        await audit_service.append_entry(
+                            db=db,
+                            event_type="VISION_EXTRACTION",
+                            detail=f"Extraction failed: {vision_result.error} — {vision_result.assessment}",
+                            actor_user_id=user_id,
+                        )
+                        await db.commit()
+                yield _sse_event("step_complete", {
+                    "step": "vision",
+                    "status": "failed",
+                    "readout": f"Extraction failed: {vision_result.error}",
                     "vision": vision_result.model_dump(),
                     "elapsed_ms": elapsed,
                 })
@@ -711,6 +777,7 @@ async def stream_query(
                 "retrieved_chunks": [c.model_dump() for c in retrieved_chunks],
                 "vision_analysis": vision_result.model_dump() if vision_result else None,
                 "calculation_result": calc_result.model_dump() if calc_result else None,
+                "model_routing": routing,
                 "audit_entry": {"index": entry.idx, "hash": entry.hash, "prev_hash": entry.prev_hash},
             })
             return
@@ -783,6 +850,7 @@ async def stream_query(
             "approval_required": False,
             "thread_id": thread_id,
             "final_synthesis": plan_result.get("synthesis"),
+            "model_routing": routing,
             "audit_entry": audit_payload,
             "total_elapsed_ms": int((time.time() - t0) * 1000),
         })

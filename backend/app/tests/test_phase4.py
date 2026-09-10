@@ -18,6 +18,7 @@ Tests:
 import os
 import pytest
 import httpx
+import cv2
 from unittest.mock import patch, AsyncMock
 from httpx import ASGITransport, AsyncClient
 
@@ -63,6 +64,69 @@ async def test_D_invalid_image():
     result = await vision_service.extract_gauge_reading(bad_bytes)
     assert result.reading is None
     assert result.status == "invalid_image"
+
+@pytest.mark.asyncio
+async def test_vision_service_outcomes_quad_state():
+    """
+    Verifies that VisionService distinguishes four explicit outcomes:
+      (a) No image provided -> status='skipped', reading=None
+      (b) Corrupted/invalid/oversized image -> status='invalid_image', reading=None, error set
+      (c) Genuine decode -> status='success', reading=float
+      (d) Valid image, no needle detected -> status='extraction_failed', reading=None, error set
+    """
+    import base64
+
+    # Outcome (a): No image
+    res_none = await vision_service.extract_gauge_reading(image_data=None)
+    assert res_none.status == "skipped"
+    assert res_none.reading is None
+    assert res_none.error is None
+
+    res_empty_str = await vision_service.extract_gauge_reading(image_data="   ")
+    assert res_empty_str.status == "skipped"
+    assert res_empty_str.reading is None
+
+    # Outcome (b): Invalid magic bytes
+    bad_bytes_b64 = base64.b64encode(b"NOT_A_VALID_IMAGE_HEADER_1234567890").decode("utf-8")
+    res_bad = await vision_service.extract_gauge_reading(image_data=bad_bytes_b64)
+    assert res_bad.status == "invalid_image"
+    assert res_bad.reading is None
+    assert res_bad.error is not None
+    assert "rejected" in res_bad.assessment.lower()
+
+    # Outcome (b): Oversized payload (>5MB)
+    huge_payload = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * (5 * 1024 * 1024 + 100)).decode("utf-8")
+    res_huge = await vision_service.extract_gauge_reading(image_data=huge_payload)
+    assert res_huge.status == "invalid_image"
+    assert res_huge.reading is None
+    assert res_huge.error is not None
+
+    # Outcome (c): Valid image with needle
+    with patch.object(vision_service, "_call_local_vlm", new_callable=AsyncMock) as mock_vlm:
+        mock_vlm.return_value = {"reading": 6.4, "confidence": 0.95}
+        gauge_b64 = vision_service.generate_synthetic_gauge(pressure_bar=6.4)
+        res_good = await vision_service.extract_gauge_reading(image_data=gauge_b64)
+        assert res_good.status == "success"
+        assert res_good.reading is not None
+        assert abs(res_good.reading - 6.4) <= 0.2
+        assert res_good.error is None
+
+    # Outcome (d): Valid image but no gauge needle (blank white PNG)
+    # This is the exact scenario from the fabrication bug report:
+    # a legitimate PNG with zero gauge content must NOT return 6.4 bar.
+    import numpy as np
+    blank_img = np.ones((100, 100, 3), dtype=np.uint8) * 255  # solid white
+    _, buf = cv2.imencode(".png", blank_img)
+    blank_b64 = "data:image/png;base64," + base64.b64encode(buf).decode("utf-8")
+    res_blank = await vision_service.extract_gauge_reading(image_data=blank_b64)
+    assert res_blank.status == "extraction_failed", (
+        f"Blank white PNG should not produce a reading, got status={res_blank.status}"
+    )
+    assert res_blank.reading is None, (
+        f"Blank white PNG must NOT fabricate a reading, got reading={res_blank.reading}"
+    )
+    assert res_blank.error is not None
+    assert res_blank.confidence == 0.0
 
 @pytest.mark.asyncio
 async def test_E_sandbox_valid_calculation():

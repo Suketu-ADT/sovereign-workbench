@@ -147,6 +147,14 @@
       </nav>
 
       <div class="header-right">
+        <div class="header-model-pill" id="header-model-pill" title="Multi-Model Routing: DeepSeek-Coder-V2 + Qwen 2.5 32B + Qwen2.5-VL">
+          <span class="model-pill-dot"></span>
+          <span class="model-pill-name">Multi-Model Router</span>
+        </div>
+        <div class="header-sovereign-pill" id="header-sovereign-pill" title="Sovereign Air-Gap Mode Status">
+          <span class="sovereign-dot"></span>
+          <span class="sovereign-text" id="sovereign-mode-text">AIR-GAP READY</span>
+        </div>
         <div class="header-status">
           <span class="status-led" aria-hidden="true"></span>
           <span class="status-label">ONLINE</span>
@@ -203,7 +211,11 @@
           </div>
         </div>
         <div class="chat-input-footer">
-          <button type="button" id="btn-demo" class="demo-btn">Load demo scenario</button>
+          <div class="demo-pills-row" id="demo-pills-row">
+            <button type="button" id="btn-demo-coding" class="demo-pill-btn" title="Auto-routes to DeepSeek Coder V2 & Docker Sandbox">Demo 1: Coding (Pump Efficiency)</button>
+            <button type="button" id="btn-demo-doc" class="demo-pill-btn" title="Auto-routes to General Reasoning Model">Demo 2: Document (Inspection Summary)</button>
+            <button type="button" id="btn-demo-vision" class="demo-pill-btn" title="Auto-routes to Qwen2.5-VL">Demo 3: Vision (Gauge Extraction)</button>
+          </div>
           <span class="footer-sep" aria-hidden="true">&middot;</span>
           <span class="footer-hint">Ctrl+Enter to send</span>
         </div>
@@ -291,9 +303,53 @@
         </div>
         <div class="auth-header-text">
           <h2 id="auth-title">Operator Access &amp; Authentication</h2>
-          <p class="auth-subtitle">Confidential Industrial Console &middot; Air-Gapped RBAC</p>
+          <p class="auth-subtitle">Confidential Industrial Console &middot; SCADA Defense-in-Depth</p>
         </div>
         <button type="button" class="dialog-close-btn" id="btn-close-auth" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <!-- Industrial Station Telemetry Banner -->
+      <div class="auth-station-banner">
+        <div class="asb-item">
+          <span class="asb-label">TERMINAL NODE</span>
+          <span class="asb-val mono">WS-OT-04 // TURBINE-BAY</span>
+        </div>
+        <div class="asb-divider"></div>
+        <div class="asb-item">
+          <span class="asb-label">DEFENSE PIPELINE</span>
+          <span class="asb-val"><span class="asb-pulse"></span> 8-STAGE ACTIVE</span>
+        </div>
+        <div class="asb-divider"></div>
+        <div class="asb-item">
+          <span class="asb-label">AUDIT LEDGER</span>
+          <span class="asb-val mono asb-accent">SHA-256 SYNCED</span>
+        </div>
+      </div>
+
+      <!-- Connected AI Inference Engines Banner (User-requested models) -->
+      <div class="auth-models-card">
+        <div class="amc-title">
+          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2a8 8 0 1 0 8 8 8 8 0 0 0-8-8Zm0 3v5l3 3"/></svg>
+          <span>CONNECTED INFERENCE ENGINES (ACTIVE)</span>
+        </div>
+        <div class="amc-grid">
+          <div class="amc-chip">
+            <div class="amc-chip-top">
+              <span class="amc-chip-badge">REASONING PLANNER</span>
+              <span class="amc-status-dot" title="Active"></span>
+            </div>
+            <span class="amc-chip-name mono">qwen/qwen2.5-32b-instruct</span>
+            <span class="amc-chip-desc">StateGraph reasoning, tool routing &amp; HITL gate</span>
+          </div>
+          <div class="amc-chip">
+            <div class="amc-chip-top">
+              <span class="amc-chip-badge">MULTIMODAL VISION</span>
+              <span class="amc-status-dot" title="Active"></span>
+            </div>
+            <span class="amc-chip-name mono">Qwen2.5-VL 72B</span>
+            <span class="amc-chip-desc">Pressure gauge dial reading &amp; needle extraction</span>
+          </div>
+        </div>
       </div>
 
       <!-- Auth Tabs -->
@@ -316,16 +372,16 @@
 
         <!-- Quick Switch Demo Accounts -->
         <div class="auth-demo-divider">
-          <span>OR SIGN IN AS TEST OPERATOR</span>
+          <span>OR SIGN IN AS AUTHORIZED OPERATOR</span>
         </div>
         <div class="auth-quick-profiles">
           <button type="button" class="quick-profile-btn" data-demo-user="suketu">
             <div class="qp-avatar">SM</div>
             <div class="qp-info">
               <span class="qp-name">Suketu Patel (Pro)</span>
-              <span class="qp-desc">Lead Auditor &middot; Level 3 Full Facility</span>
+              <span class="qp-desc">Chief Safety Auditor &middot; Level 3 Full Facility</span>
             </div>
-            <span class="qp-badge">L3</span>
+            <span class="qp-badge qp-badge--l3">L3</span>
           </button>
           <button type="button" class="quick-profile-btn" data-demo-user="morrison">
             <div class="qp-avatar">JM</div>
@@ -333,16 +389,72 @@
               <span class="qp-name">J. Morrison (Engineer)</span>
               <span class="qp-desc">Maintenance Engineer &middot; boiler-102</span>
             </div>
-            <span class="qp-badge">L1</span>
+            <span class="qp-badge qp-badge--l1">L1</span>
           </button>
           <button type="button" class="quick-profile-btn" data-demo-user="vance">
             <div class="qp-avatar">EV</div>
             <div class="qp-info">
               <span class="qp-name">Dr. Elena Vance (Specialist)</span>
-              <span class="qp-desc">Turbines, Compressors &amp; Reactants</span>
+              <span class="qp-desc">Systems Specialist &middot; Turbines &amp; Loops</span>
             </div>
-            <span class="qp-badge">L2</span>
+            <span class="qp-badge qp-badge--l2">L2</span>
           </button>
+        </div>
+
+        <!-- Clearance Tier Capability Matrix Preview -->
+        <div class="auth-clearance-matrix">
+          <div class="acm-header">
+            <span>SCADA RBAC CAPABILITY MATRIX</span>
+            <span class="acm-sub">Deterministic Plant Allowlist</span>
+          </div>
+          <div class="acm-grid">
+            <div class="acm-row" id="preview-tier-1">
+              <span class="acm-badge acm-badge--l1">TIER 1</span>
+              <div class="acm-content">
+                <strong>Level 1 (Engineer):</strong> <code>boiler-102</code>, <code>pump-201</code>, <code>cooling-loop-c3</code>
+              </div>
+            </div>
+            <div class="acm-row" id="preview-tier-2">
+              <span class="acm-badge acm-badge--l2">TIER 2</span>
+              <div class="acm-content">
+                <strong>Level 2 (Specialist):</strong> Tier 1 + <code>turbine-gen-4</code>, Compressors
+              </div>
+            </div>
+            <div class="acm-row" id="preview-tier-3">
+              <span class="acm-badge acm-badge--l3">TIER 3</span>
+              <div class="acm-content">
+                <strong>Level 3 (Chief Auditor):</strong> All Facility Systems &middot; <code>reactor-core-aux</code> &middot; SHA-256 Ledger
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Workstation Model API Key & Gateway Override Drawer -->
+        <div class="auth-apikey-drawer" id="auth-apikey-drawer">
+          <button type="button" class="auth-apikey-toggle" id="btn-toggle-apikey">
+            <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="14" height="10" rx="2"/><circle cx="9" cy="10" r="2"/></svg>
+            <span class="apikey-toggle-text">Workstation API Key &amp; Provider Override</span>
+            <span class="apikey-status-pill" id="apikey-status-pill">Local / Air-Gap</span>
+            <svg class="apikey-chevron" id="apikey-chevron" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 6 8 10 12 6"/></svg>
+          </button>
+          <div class="auth-apikey-body" id="auth-apikey-body" hidden>
+            <p class="apikey-notice">Optional: Enter your API key (e.g. OpenRouter or DashScope) to route reasoning and vision to <strong>qwen/qwen2.5-32b-instruct</strong> and <strong>Qwen2.5-VL 72B</strong>.</p>
+            <div class="form-group">
+              <label for="input-model-apikey">Model API Key (Bearer Token)</label>
+              <div class="input-password-wrap">
+                <input type="password" id="input-model-apikey" class="form-input" placeholder="sk-or-v1-... or API Token">
+                <button type="button" class="btn-toggle-mask" id="btn-toggle-key-mask" aria-label="Toggle password visibility">👁️</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="input-model-baseurl">API Base URL</label>
+              <input type="text" id="input-model-baseurl" class="form-input" placeholder="https://openrouter.ai/api/v1">
+            </div>
+            <div class="apikey-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-save-apikey">Save for Workstation</button>
+              <button type="button" class="btn btn-text btn-sm" id="btn-clear-apikey">Reset to Default</button>
+            </div>
+          </div>
         </div>
       </form>
 
@@ -370,6 +482,85 @@
         </div>
         <button type="submit" class="btn btn-approve btn-auth-submit" id="btn-signup-submit">REGISTER OPERATOR CREDENTIALS</button>
       </form>
+    </div>
+  </dialog>
+
+  <!-- ══════════ OPERATOR SHIFT HANDOVER & SECURITY BRIEFING ══════════ -->
+  <dialog id="shift-briefing-dialog" class="shift-briefing-dialog" aria-labelledby="sbd-title">
+    <div class="dialog-inner panel-frame shift-briefing-inner">
+      <div class="sbd-header">
+        <div class="sbd-badge-seal">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M12 2L3 6v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V6l-9-4z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <div class="sbd-header-text">
+          <span class="sbd-kicker">SCADA AUTHENTICATION CONFIRMED</span>
+          <h2 id="sbd-title">Operator Shift Handover Briefing</h2>
+          <p class="sbd-sub">Terminal Session Initialized &middot; Workstation WS-OT-04</p>
+        </div>
+      </div>
+
+      <div class="sbd-body">
+        <!-- Operator Identity Card -->
+        <div class="sbd-card sbd-card--profile">
+          <div class="sbd-avatar" id="sbd-avatar">SM</div>
+          <div class="sbd-profile-info">
+            <div class="sbd-name-row">
+              <h3 id="sbd-name">Suketu Patel</h3>
+              <span class="sbd-clearance-badge" id="sbd-clearance">Level 3 &middot; Chief Auditor</span>
+            </div>
+            <span class="sbd-email mono" id="sbd-email">suketu.2005@gmail.com</span>
+            <span class="sbd-role" id="sbd-role">Chief_Safety_Auditor &middot; All Systems Authorized</span>
+          </div>
+        </div>
+
+        <!-- Connected AI Engines -->
+        <div class="sbd-card sbd-card--models">
+          <div class="sbd-card-label">ACTIVE NEURAL REASONING &amp; VISION</div>
+          <div class="sbd-model-row">
+            <span class="sbd-model-icon">🧠</span>
+            <div class="sbd-model-meta">
+              <span class="sbd-model-name mono">qwen/qwen2.5-32b-instruct</span>
+              <span class="sbd-model-desc">StateGraph Reasoning &amp; Tool Orchestration</span>
+            </div>
+            <span class="sbd-model-status text-success">LINKED</span>
+          </div>
+          <div class="sbd-model-row">
+            <span class="sbd-model-icon">👁️</span>
+            <div class="sbd-model-meta">
+              <span class="sbd-model-name mono">Qwen2.5-VL 72B</span>
+              <span class="sbd-model-desc">Multimodal Gauge Dial Telemetry</span>
+            </div>
+            <span class="sbd-model-status text-success">LINKED</span>
+          </div>
+        </div>
+
+        <!-- Authorized SCADA Subsystems -->
+        <div class="sbd-card sbd-card--units">
+          <div class="sbd-card-label">AUTHORIZED EQUIPMENT FOR CURRENT SHIFT</div>
+          <div class="sbd-units-list" id="sbd-units-list">
+            <!-- Rendered by script.js -->
+          </div>
+        </div>
+
+        <!-- Audit Ledger Block Status -->
+        <div class="sbd-card sbd-card--ledger">
+          <div class="sbd-card-label">TAMPER-PROOF AUDIT TRAIL</div>
+          <div class="sbd-ledger-row">
+            <span class="sbd-ledger-hash mono" id="sbd-ledger-hash">SHA-256 HASH CHAIN: INTEGRITY NOMINAL</span>
+            <span class="sbd-ledger-badge">IMMUTABLE</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sbd-actions">
+        <button type="button" class="btn btn-approve btn-sbd-enter" id="btn-enter-console">
+          <span>ENTER WORKSTATION CONSOLE</span>
+          <span class="sbd-countdown" id="sbd-countdown">(3s)</span>
+        </button>
+      </div>
     </div>
   </dialog>
 

@@ -39,24 +39,220 @@ STATIC_TOOL_REGISTRY = {
     "emergency_shutdown": {"description": "Emergency shutdown (SENSITIVE)", "sensitive": True, "authority": "Plant_Director (HITL Required)"},
     "override": {"description": "System override (SENSITIVE)", "sensitive": True, "authority": "Chief_Safety_Auditor (HITL Required)"},
     "inspect_log": {"description": "Normal non-sensitive logging", "sensitive": False, "authority": None},
+    "execute_python_code": {"description": "Generate and execute verified Python code via DeepSeek Coder V2 in Docker sandbox", "sensitive": False, "authority": None},
     "none": {"description": "No action needed", "sensitive": False, "authority": None}
 }
+
+def _deterministic_planner_fallback(prompt: str) -> dict:
+    """Deterministic, allowlist-enforced fallback reasoning engine.
+    Active when remote LLM and local Ollama are unreachable or unconfigured.
+    Guarantees air-gap availability and zero downtime.
+    """
+    prompt_lower = prompt.lower()
+    user_query = prompt_lower
+    if "user query:" in prompt_lower:
+        user_query = prompt_lower.split("user query:")[1].split("target unit:")[0]
+
+    delta_p = 0.0
+    if "delta p = " in prompt_lower:
+        try:
+            dp_part = prompt_lower.split("delta p = ")[1].split(" bar")[0].strip()
+            delta_p = float(dp_part)
+        except Exception:
+            delta_p = 0.0
+
+    needs_sensitive = any(
+        term in user_query
+        for term in ["valve", "open", "close", "shutdown", "override", "emergency", "scram"]
+    ) or (delta_p > 5.0)
+
+    if needs_sensitive:
+        if "governor" in user_query:
+            action_name = "adjust_governor"
+            intent = "Adjust turbine governor within safe operating envelope"
+            reason = "Turbine speed/frequency deviation detected or requested; HITL adjustment required."
+        elif "shutdown" in user_query or "scram" in user_query:
+            action_name = "scram_containment"
+            intent = "Execute emergency safety shutdown / containment SCRAM"
+            reason = "Emergency shutdown signal triggered or requested; plant director HITL authorization required."
+        else:
+            action_name = "open_release_valve"
+            intent = "Vent excessive unit pressure via safety release valve"
+            reason = f"Pressure relief required (Delta P = {delta_p} bar). Operator approval needed to actuate valve."
+
+        return {
+            "response": json.dumps({
+                "intent": intent,
+                "required_tools": [action_name],
+                "proposed_action": action_name,
+                "requires_sensitive_approval": True,
+                "reason": reason,
+            })
+        }
+    else:
+        if any(w in user_query for w in ["manual", "procedure", "sop", "document", "standard"]):
+            action_name = "retrieve_manual"
+            intent = "Retrieve standard operating procedure documentation"
+            reason = "Consulting verified engineering specifications and operational limits."
+        elif any(w in user_query for w in ["gauge", "vision", "camera", "dial", "image", "reading"]):
+            action_name = "read_gauge"
+            intent = "Inspect analog dial gauge reading via visual telemetry"
+            reason = "Extracting gauge measurement from camera stream."
+        elif any(w in user_query for w in ["calculate", "drop", "difference", "delta"]) and not any(w in user_query for w in ["code", "python"]):
+            action_name = "calculate_pressure_drop"
+            intent = "Calculate differential pressure drop across inlet and outlet"
+            reason = "Verifying differential pressure against nominal thresholds."
+        elif any(w in user_query for w in ["code", "python", "script", "pump efficiency", "function"]):
+            action_name = "execute_python_code"
+            intent = "Generate and execute verified Python code via DeepSeek Coder V2 in Docker sandbox"
+            reason = "Industrial Python script execution requested; executing within isolated Docker sandbox."
+        else:
+            action_name = "inspect_log"
+            intent = "Review operational telemetry and audit logs"
+            reason = "Operational parameters verified within nominal boundaries. Standard monitoring active."
+
+        return {
+            "response": json.dumps({
+                "intent": intent,
+                "required_tools": [action_name],
+                "proposed_action": action_name,
+                "requires_sensitive_approval": False,
+                "reason": reason,
+            })
+        }
+
 
 async def _call_llm_planner(prompt: str) -> dict:
     if not settings.PLANNER_MODEL_ENABLED:
         raise ValueError("Planner model is disabled")
-    
-    url = f"{settings.PLANNER_MODEL_URL}/api/generate"
-    payload = {
-        "model": settings.PLANNER_MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json"
-    }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, timeout=settings.PLANNER_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
+
+    api_key = (settings.LLM_API_KEY or "").strip()
+    base_url = (settings.LLM_BASE_URL or "").strip().rstrip("/")
+    model_name = settings.PLANNER_MODEL_NAME
+
+    is_local_endpoint = bool(base_url and any(h in base_url.lower() for h in ["127.0.0.1", "localhost", "0.0.0.0"]))
+    can_call_remote = bool(api_key or is_local_endpoint)
+
+    # 0. Try Hugging Face Inference Router if HF_TOKEN is configured and not in Sovereign Mode
+    hf_token = (getattr(settings, "HF_TOKEN", None) or os.getenv("HF_TOKEN") or "").strip()
+    if hf_token and not getattr(settings, "SOVEREIGN_MODE", False):
+        try:
+            from app.services.huggingface_client import call_huggingface
+            hf_model = "Qwen/Qwen2.5-72B-Instruct"
+            system_msg = (
+                "You are the Sovereign Industrial Reasoning Planner. "
+                "Analyze operator telemetry and SOP manual context. "
+                "You must respond ONLY with a single valid JSON object strictly conforming to this schema:\n"
+                "{\n"
+                '  "intent": "string",\n'
+                '  "required_tools": ["string"],\n'
+                '  "proposed_action": "string",\n'
+                '  "requires_sensitive_approval": boolean,\n'
+                '  "reason": "string"\n'
+                "}\n"
+                "Do not include any markdown fences (like ```json), explanations, or surrounding text."
+            )
+            raw_text = call_huggingface(
+                model=hf_model,
+                user_prompt=prompt,
+                system_prompt=system_msg,
+                timeout=settings.PLANNER_TIMEOUT,
+            )
+            if raw_text:
+                cleaned = raw_text.strip()
+                if "```" in cleaned:
+                    import re
+                    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned.strip(), flags=re.MULTILINE).strip()
+                parsed_json = json.loads(cleaned)
+                logger.info("Planner successfully synthesized plan via Hugging Face model (%s)", hf_model)
+                return {"response": json.dumps(parsed_json)}
+        except Exception as e:
+            logger.warning("Hugging Face planner call failed (%s). Continuing to local/deterministic fallbacks.", e)
+
+    # 1. Try remote OpenAI-compatible API (e.g. OpenRouter / DashScope / local vLLM) if credentials or local endpoint exist
+    if can_call_remote and base_url:
+        url = f"{base_url}/chat/completions" if not base_url.endswith("/chat/completions") else base_url
+        headers = {
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://sovereign.workbench.internal",
+            "X-Title": "Sovereign Industrial Workbench",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are the Sovereign Industrial Reasoning Planner. "
+                        "Analyze operator telemetry and SOP manual context. "
+                        "You must respond ONLY with a single valid JSON object strictly conforming to this schema:\n"
+                        "{\n"
+                        '  "intent": "string",\n'
+                        '  "required_tools": ["string"],\n'
+                        '  "proposed_action": "string",\n'
+                        '  "requires_sensitive_approval": boolean,\n'
+                        '  "reason": "string"\n'
+                        "}\n"
+                        "Do not include any markdown fences (like ```json), explanations, or surrounding text."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=settings.PLANNER_TIMEOUT) as client:
+                res = await client.post(url, json=payload, headers=headers)
+                if res.status_code == 200:
+                    data = res.json()
+                    choices = data.get("choices", [])
+                    content = choices[0]["message"]["content"] if choices else "{}"
+                    if "```" in content:
+                        import re
+                        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.MULTILINE)
+                    return {"response": content, "raw": data}
+                else:
+                    logger.warning(
+                        "Remote LLM API responded with HTTP %d: %s. Falling back to local/deterministic planner.",
+                        res.status_code,
+                        res.text[:200],
+                    )
+        except Exception as e:
+            logger.warning("Remote LLM planner call failed: %s. Falling back.", e)
+
+    # 2. Try local Ollama /api/generate if configured
+    if settings.PLANNER_MODEL_URL:
+        try:
+            url = f"{settings.PLANNER_MODEL_URL}/api/generate"
+            payload = {
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+            }
+            async with httpx.AsyncClient(timeout=settings.PLANNER_TIMEOUT) as client:
+                response = await client.post(url, json=payload)
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    logger.warning(
+                        "Local Ollama responded with HTTP %d. Engaging fallback.",
+                        response.status_code,
+                    )
+        except Exception as e:
+            logger.warning("Local Ollama planner call failed: %s. Engaging fallback.", e)
+
+    # 3. Deterministic safety rule engine fallback (zero downtime, air-gapped resilience)
+    logger.info("Engaging deterministic industrial safety rule engine fallback")
+    return _deterministic_planner_fallback(prompt)
 
 # Authority string to minimum required clearance mapping
 AUTHORITY_CLEARANCE_MAP = {
@@ -93,6 +289,8 @@ class PlanState(TypedDict):
     approval_decision: str | None  # "approved" or "rejected"
     action_status: str  # "PENDING", "EXECUTED", "REJECTED", "NOT_REQUIRED"
     final_synthesis: str | None
+    code_execution: dict[str, Any] | None
+    model_routing: dict[str, Any] | None
 
 
 async def reasoning_node(state: PlanState) -> dict[str, Any]:
@@ -184,6 +382,28 @@ Output strictly valid JSON matching this schema:
             "action_status": "PENDING",
             "final_synthesis": f"Sensitive actuator action '{action_name}' requested. Awaiting operator authorization.",
         }
+
+    if action_name == "execute_python_code":
+        try:
+            from app.services.coding_agent_service import coding_agent_service
+            code_res = await coding_agent_service.run_coding_workflow(query)
+            code_str = code_res.get("code", "")
+            output_str = code_res.get("output", "")
+            synth = (
+                f"DeepSeek Coder V2 generated and verified Python implementation:\n\n"
+                f"```python\n{code_str}\n```\n\n"
+                f"Sandbox Execution Result:\n{output_str}"
+            )
+            return {
+                "proposed_action": {"action": action_name, "target": unit},
+                "approval_required": False,
+                "approval_details": None,
+                "action_status": "EXECUTED",
+                "final_synthesis": synth,
+                "code_execution": code_res,
+            }
+        except Exception as e:
+            logger.error("Coding workflow error in planner reasoning node: %s", e)
 
     return {
         "proposed_action": {"action": action_name, "target": unit},

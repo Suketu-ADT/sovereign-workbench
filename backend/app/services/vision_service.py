@@ -58,13 +58,79 @@ class VisionService:
         self.timeout = timeout or settings.VISION_TIMEOUT
 
     async def _call_local_vlm(self, image_b64: str, prompt: str) -> dict[str, Any] | None:
-        """Attempts calling a local Qwen2.5-VL endpoint with circuit breaker protection."""
+        """Attempts calling Qwen2.5-VL 72B (via cloud API) or local VLM endpoint with circuit breaker protection."""
         global _last_vlm_failure_time
-        if not self.vlm_enabled or not self.vlm_url:
+        if not self.vlm_enabled:
             return None
 
         # Check circuit breaker
         if time.time() - _last_vlm_failure_time < _CIRCUIT_BREAKER_COOLDOWN:
+            return None
+
+        # 1. Check if remote OpenAI-compatible API is configured (e.g. OpenRouter / DashScope)
+        api_key = (settings.LLM_API_KEY or "").strip()
+        base_url = (settings.LLM_BASE_URL or "").strip().rstrip("/")
+        is_local_endpoint = bool(base_url and any(h in base_url.lower() for h in ["127.0.0.1", "localhost", "0.0.0.0"]))
+        can_call_remote = bool(api_key or is_local_endpoint)
+
+        if can_call_remote and base_url:
+            url = f"{base_url}/chat/completions" if not base_url.endswith("/chat/completions") else base_url
+            headers = {
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://sovereign.workbench.internal",
+                "X-Title": "Sovereign Industrial Workbench",
+            }
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            data_url = image_b64 if image_b64.startswith("data:") else f"data:image/png;base64,{image_b64}"
+            payload = {
+                "model": self.vlm_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an industrial computer vision expert inspecting analog pressure dial gauges. "
+                            "Analyze the gauge dial and needle position carefully. "
+                            "Output strictly valid JSON conforming to this schema:\n"
+                            '{"reading": float, "confidence": float}\n'
+                            "where reading is the measured value in bar (e.g. 6.4) and confidence is between 0.0 and 1.0. "
+                            "Do not wrap in markdown fences or include any extra text."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    },
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.1,
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    res = await client.post(url, json=payload, headers=headers)
+                    if res.status_code == 200:
+                        import json
+                        import re
+                        res_data = res.json()
+                        choices = res_data.get("choices", [])
+                        text_val = choices[0]["message"]["content"] if choices else "{}"
+                        if "```" in text_val:
+                            text_val = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_val.strip(), flags=re.MULTILINE)
+                        return json.loads(text_val)
+                    else:
+                        logger.warning("Remote VLM API responded with HTTP %d: %s", res.status_code, res.text)
+            except Exception as e:
+                logger.info("Remote VLM endpoint call failed (%s). Activating circuit breaker.", e)
+                _last_vlm_failure_time = time.time()
+                return None
+
+        # 2. Local Ollama VLM fallback
+        if not self.vlm_url:
             return None
 
         try:
@@ -132,7 +198,58 @@ class VisionService:
             logger.warning("Failed to decode image buffer: %s", e)
             return None
 
-    
+    def _analyze_gauge_opencv(self, img: np.ndarray) -> tuple[float | None, float]:
+        """
+        Extracts pressure dial reading from image using circle detection and needle vector angle.
+        Returns (reading_bar, confidence) where reading_bar is None if no needle was detected.
+        Confidence is derived from the proportion of needle pixels found relative to image area.
+        """
+        h, w = img.shape[:2]
+        total_pixels = h * w
+        center_x, center_y = w // 2, int(h * 0.55)
+
+        # 1. Search for red/accent colored needle
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # Red spans 0-10 and 170-180 in OpenCV HSV
+        mask1 = cv2.inRange(hsv, np.array([0, 70, 50]), np.array([10, 255, 255]))
+        mask2 = cv2.inRange(hsv, np.array([170, 70, 50]), np.array([180, 255, 255]))
+        mask = mask1 | mask2
+
+        pts = cv2.findNonZero(mask)
+        if pts is not None and len(pts) > 5:
+            pts = pts.reshape(-1, 2)
+            # Find the point furthest from the dial pivot center
+            dists = np.linalg.norm(pts - np.array([center_x, center_y]), axis=1)
+            tip = pts[np.argmax(dists)]
+
+            # Angle from dial pivot
+            calc_angle = math.atan2(tip[1] - center_y, tip[0] - center_x)
+            if calc_angle < 0:
+                calc_angle += 2 * math.pi
+
+            # Dial arc spans pi to 2*pi for top half (0 to 10 bar)
+            if calc_angle >= math.pi:
+                fraction = (calc_angle - math.pi) / math.pi
+                reading = round(fraction * 10.0, 1)
+                # Cap within valid instrument range [0.0, 10.0]
+                reading = max(0.0, min(10.0, reading))
+
+                # Compute confidence from needle pixel evidence:
+                # needle_ratio = needle pixels / total pixels, scaled and clamped
+                needle_pixel_count = len(pts)
+                needle_ratio = needle_pixel_count / total_pixels
+                # A well-visible needle typically covers 0.5-3% of gauge area.
+                # Scale: ratio >= 0.005 -> confidence 0.95+, ratio ~0.001 -> ~0.80
+                confidence = min(0.99, max(0.50, 0.75 + needle_ratio * 40.0))
+                return reading, round(confidence, 2)
+
+        # No needle detected — signal extraction failure (do NOT fabricate a reading)
+        logger.warning(
+            "Gauge needle not detected: found %d red pixels (minimum 6 required). "
+            "Cannot extract reading.",
+            len(pts) if pts is not None else 0,
+        )
+        return None, 0.0
 
     async def extract_gauge_reading(
         self,
@@ -141,10 +258,11 @@ class VisionService:
     ) -> VisionResult:
         """
         Processes gauge photo to extract numerical pressure reading.
-        Distinguishes 3 distinct outcomes:
+        Distinguishes 4 distinct outcomes:
           (a) No image provided -> status='skipped', reading=None
           (b) Image decode / validation failed -> status='invalid_image', reading=None
           (c) Successful decode & extraction -> status='success', reading=float
+          (d) Valid image but needle not detected -> status='extraction_failed', reading=None
         """
         # Outcome (a): No image provided (legitimate skip)
         if not image_data or (isinstance(image_data, str) and not image_data.strip()):
@@ -171,7 +289,7 @@ class VisionService:
                 error="Invalid or corrupted image format",
             )
 
-        # Outcome (c): Valid image decoded -> perform VLM or OpenCV extraction
+        # Valid image decoded -> perform VLM or OpenCV extraction
         reading = None
         confidence = 0.0
 
@@ -205,6 +323,19 @@ class VisionService:
                 error="Failed to extract numerical reading from image",
             )
 
+        # Outcome (d): Valid image decoded but needle extraction failed
+        if reading is None:
+            return VisionResult(
+                status="extraction_failed",
+                reading=None,
+                unit="bar",
+                parameter="inlet_pressure",
+                confidence=0.0,
+                assessment="Gauge needle not detected — unable to extract reading from image",
+                error="No gauge needle detected in image",
+            )
+
+        # Outcome (c): Successful extraction
         # Formulate assessment based on operational equipment parameters
         if equipment_unit == "boiler-102" or "boiler" in equipment_unit:
             if 4.0 <= reading <= 7.0:

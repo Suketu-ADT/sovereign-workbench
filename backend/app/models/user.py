@@ -5,17 +5,18 @@ User model — operator accounts with role-based clearance.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String, Uuid
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.db.types import GUID
 
 
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
+        GUID,
         primary_key=True,
         default=uuid.uuid4,
     )
