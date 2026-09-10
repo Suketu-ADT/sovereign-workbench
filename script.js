@@ -149,7 +149,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var API_BASE = 'http://127.0.0.1:8000';
 
   var state = {
-    theme: null,
+    theme: localStorage.getItem('sovereign_theme') || 'light',
     currentView: 'chat',
     sidebarOpen: true,
     pipelineRunning: false,
@@ -324,11 +324,18 @@ document.addEventListener('DOMContentLoaded', function () {
   // ── THEME ──────────────────────────────────────────────────
 
   function applyTheme() {
-    if (state.theme) document.documentElement.setAttribute('data-theme', state.theme);
-    else document.documentElement.removeAttribute('data-theme');
+    var theme = state.theme || 'light';
+    state.theme = theme;
+    document.documentElement.setAttribute('data-theme', theme);
+    try {
+      localStorage.setItem('sovereign_theme', theme);
+    } catch (e) {}
+    if (els.settingThemeSelect) {
+      els.settingThemeSelect.value = theme;
+    }
   }
   function toggleTheme() {
-    state.theme = !state.theme ? 'dark' : state.theme === 'dark' ? 'light' : null;
+    state.theme = state.theme === 'dark' ? 'light' : 'dark';
     applyTheme();
   }
 
@@ -687,8 +694,19 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function toggleSidebar() {
-    if (state.sidebarOpen) closeSidebar();
-    else openSidebar();
+    if (isMobile()) {
+      if (els.sidebar.classList.contains('open')) {
+        closeSidebar();
+      } else {
+        openSidebar();
+      }
+    } else {
+      if (els.sidebar.classList.contains('collapsed')) {
+        openSidebar();
+      } else {
+        closeSidebar();
+      }
+    }
   }
 
   function renderChatList() {
@@ -801,14 +819,54 @@ document.addEventListener('DOMContentLoaded', function () {
   function renderChatMessages() {
     var chat = getActiveChat();
     if (!chat || chat.messages.length === 0) {
-      // Show welcome screen
+      // Show refined Cerebrium-style welcome screen
       els.chatMessages.innerHTML =
         '<div class="chat-welcome">' +
-          '<svg class="chat-welcome-logo" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.3">' +
-            '<rect x="4" y="4" width="40" height="40" rx="2"/><line x1="24" y1="4" x2="24" y2="44"/><line x1="4" y1="24" x2="44" y2="24"/><circle cx="24" cy="24" r="10"/>' +
-          '</svg>' +
-          '<h2>Sovereign Workbench</h2>' +
-          '<p>Confidential on-premise AI console for industrial maintenance operations. All queries pass through a verified defense pipeline with hash-chain audit logging.</p>' +
+          '<div class="chat-welcome-badge">' +
+            '<svg class="chat-welcome-logo" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6">' +
+              '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/><circle cx="12" cy="12" r="4"/>' +
+            '</svg>' +
+          '</div>' +
+          '<h1 class="chat-welcome-title">Sovereign Workbench</h1>' +
+          '<p class="chat-welcome-sub">Your secure AI workspace for industrial operations.</p>' +
+          '<div class="chat-welcome-suggestions">' +
+            '<button type="button" class="suggestion-card" data-prompt="Write Python code to calculate pump efficiency when input power is 100 kW and output power is 85 kW.">' +
+              '<div class="suggestion-card-icon">' +
+                '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="5 4 2 8 5 12"/><polyline points="11 4 14 8 11 12"/><line x1="9.5" y1="3.5" x2="6.5" y2="12.5"/></svg>' +
+              '</div>' +
+              '<div class="suggestion-card-text">' +
+                '<span class="suggestion-card-title">Analyze pump vibration</span>' +
+                '<span class="suggestion-card-desc">Calculate efficiency &amp; vibration spectrum</span>' +
+              '</div>' +
+            '</button>' +
+            '<button type="button" class="suggestion-card" data-prompt="Summarize this engineering inspection report.">' +
+              '<div class="suggestion-card-icon">' +
+                '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1.5H3.5A1.5 1.5 0 0 0 2 3v10a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 14 13V6.5L9 1.5Z"/><polyline points="9 1.5 9 6.5 14 6.5"/><line x1="5" y1="9" x2="11" y2="9"/><line x1="5" y1="11.5" x2="9" y2="11.5"/></svg>' +
+              '</div>' +
+              '<div class="suggestion-card-text">' +
+                '<span class="suggestion-card-title">Generate inspection summary</span>' +
+                '<span class="suggestion-card-desc">Audit compliance &amp; safety protocols</span>' +
+              '</div>' +
+            '</button>' +
+            '<button type="button" class="suggestion-card" data-prompt="Read this inspection image and extract the gauge reading." data-image="true">' +
+              '<div class="suggestion-card-icon">' +
+                '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2"/><line x1="8" y1="2" x2="8" y2="4"/><line x1="8" y1="12" x2="8" y2="14"/></svg>' +
+              '</div>' +
+              '<div class="suggestion-card-text">' +
+                '<span class="suggestion-card-title">Extract gauge reading</span>' +
+                '<span class="suggestion-card-desc">Multimodal computer vision dial telemetry</span>' +
+              '</div>' +
+            '</button>' +
+            '<button type="button" class="suggestion-card" data-prompt="Fetch boiler-102 log, calculate pressure drop, and check for anomalies.">' +
+              '<div class="suggestion-card-icon">' +
+                '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5L2.5 4.5v3.5c0 3.5 2.4 6.8 5.5 7.5 3.1-.7 5.5-4 5.5-7.5V4.5L8 1.5Z"/></svg>' +
+              '</div>' +
+              '<div class="suggestion-card-text">' +
+                '<span class="suggestion-card-title">Explain maintenance anomaly</span>' +
+                '<span class="suggestion-card-desc">Root-cause telemetry correlation &amp; SOP</span>' +
+              '</div>' +
+            '</button>' +
+          '</div>' +
         '</div>';
       return;
     }
@@ -817,10 +875,11 @@ document.addEventListener('DOMContentLoaded', function () {
     chat.messages.forEach(function(m, idx) {
       var isUser = m.role === 'user';
       var avatarLabel = isUser ? 'ME' : 'SW';
+      var senderLabel = isUser ? 'You' : 'Sovereign AI';
       html += '<div class="message message--' + m.role + '">';
       html += '<div class="msg-avatar">' + avatarLabel + '</div>';
       html += '<div class="msg-body">';
-      html += '<div class="msg-sender">' + (isUser ? 'You' : 'Sovereign Workbench') + '</div>';
+      html += '<div class="msg-sender"><span class="msg-sender-name">' + senderLabel + '</span>' + (!isUser ? '<span class="msg-sender-badge">Air-Gapped</span>' : '') + '</div>';
       html += '<div class="msg-content">';
 
       if (m.image) {
@@ -2254,11 +2313,27 @@ document.addEventListener('DOMContentLoaded', function () {
   els.btnSend.addEventListener('click', handleSubmit);
 
   els.chatInput.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleSubmit(); }
+    if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        return; // Allow Shift+Enter to create a new line
+      }
+      e.preventDefault();
+      handleSubmit();
+    }
   });
 
-  // Thinking block toggle (collapse / expand)
+  // Handle clicks in chatMessages (suggestion cards, thinking block toggle)
   els.chatMessages.addEventListener('click', function(e) {
+    var card = e.target.closest('.suggestion-card');
+    if (card) {
+      var prompt = card.getAttribute('data-prompt');
+      var attachImg = card.getAttribute('data-image') === 'true';
+      if (prompt) {
+        loadDemoScenario(prompt, attachImg);
+      }
+      return;
+    }
+
     var toggle = e.target.closest('.thinking-toggle');
     if (toggle) {
       var block = toggle.closest('.thinking-block');
