@@ -7,7 +7,7 @@
   <meta name="description" content="Operator console for the Sovereign On-Premise Agentic AI Workbench. Confidential industrial query processing with visible defense pipeline and hash-chain audit logging.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -149,15 +149,15 @@
       <div class="header-right">
         <div class="header-model-pill" id="header-model-pill" title="Multi-Model Routing: DeepSeek-Coder-V2 + Qwen 2.5 32B + Qwen2.5-VL">
           <span class="model-pill-dot"></span>
-          <span class="model-pill-name">Multi-Model Router</span>
+          <span class="model-pill-name">Multi-Model</span>
         </div>
         <div class="header-sovereign-pill" id="header-sovereign-pill" title="Sovereign Air-Gap Mode Status">
           <span class="sovereign-dot"></span>
-          <span class="sovereign-text" id="sovereign-mode-text">AIR-GAP READY</span>
+          <span class="sovereign-text" id="sovereign-mode-text">RAG Ready</span>
         </div>
         <div class="header-status">
           <span class="status-led" aria-hidden="true"></span>
-          <span class="status-label">ONLINE</span>
+          <span class="status-label">Online</span>
         </div>
         <button type="button" id="theme-toggle" class="header-icon-btn" aria-label="Toggle color theme" title="Toggle theme">
           <svg class="icon-sun" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -202,7 +202,7 @@
               </svg>
               <input type="file" id="image-attach" accept="image/*" hidden>
             </label>
-            <textarea id="chat-input" rows="1" placeholder="Send a message..." aria-label="Message input"></textarea>
+            <textarea id="chat-input" rows="1" placeholder="Ask Sovereign Workbench about equipment, logs, telemetry..." aria-label="Message input"></textarea>
             <button type="button" id="btn-send" class="input-send-btn" disabled aria-label="Send message">
               <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <line x1="10" y1="16" x2="10" y2="4"/><polyline points="5,9 10,4 15,9"/>
@@ -212,12 +212,23 @@
         </div>
         <div class="chat-input-footer">
           <div class="demo-pills-row" id="demo-pills-row">
-            <button type="button" id="btn-demo-coding" class="demo-pill-btn" title="Auto-routes to DeepSeek Coder V2 & Docker Sandbox">Demo 1: Coding (Pump Efficiency)</button>
-            <button type="button" id="btn-demo-doc" class="demo-pill-btn" title="Auto-routes to General Reasoning Model">Demo 2: Document (Inspection Summary)</button>
-            <button type="button" id="btn-demo-vision" class="demo-pill-btn" title="Auto-routes to Qwen2.5-VL">Demo 3: Vision (Gauge Extraction)</button>
+            <button type="button" id="btn-demo-coding" class="demo-pill-btn" title="Auto-routes to DeepSeek Coder V2 & Docker Sandbox">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><polyline points="5 4 2 8 5 12"/><polyline points="11 4 14 8 11 12"/><line x1="9.5" y1="3.5" x2="6.5" y2="12.5"/></svg>
+              <span>Pump Efficiency</span>
+              <span class="demo-pill-sub">Code</span>
+            </button>
+            <button type="button" id="btn-demo-doc" class="demo-pill-btn" title="Auto-routes to General Reasoning Model">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 1.5H3.5A1.5 1.5 0 0 0 2 3v10a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 14 13V6.5L9 1.5Z"/><polyline points="9 1.5 9 6.5 14 6.5"/></svg>
+              <span>Inspection Summary</span>
+              <span class="demo-pill-sub">Doc</span>
+            </button>
+            <button type="button" id="btn-demo-vision" class="demo-pill-btn" title="Auto-routes to Qwen2.5-VL">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2"/><line x1="8" y1="2" x2="8" y2="4"/><line x1="8" y1="12" x2="8" y2="14"/></svg>
+              <span>Gauge Reading</span>
+              <span class="demo-pill-sub">Vision</span>
+            </button>
           </div>
-          <span class="footer-sep" aria-hidden="true">&middot;</span>
-          <span class="footer-hint">Ctrl+Enter to send</span>
+          <span class="footer-hint">Enter to send &middot; Shift+Enter for new line</span>
         </div>
       </div>
     </div>
