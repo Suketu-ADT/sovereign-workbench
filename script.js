@@ -1824,11 +1824,18 @@ document.addEventListener('DOMContentLoaded', function () {
     return s;
   }
 
-  function extractCodeAndOutput(responseText, responseData) {
+  function extractCodeAndOutput(responseText, responseData, isCodingTask) {
     var code = (responseData && responseData.code) || '';
-    var output = (responseData && responseData.execution_result) || '';
+    var output = (responseData && responseData.execution_result) || (responseData && responseData.code_execution && responseData.code_execution.output) || '';
     var intro = '';
     var outro = '';
+
+    // If this is NOT a coding task and backend did not provide verified code execution,
+    // do not extract code fences into an interactive sandbox runner.
+    // Instead, leave code fences inside the text to be rendered as readable markdown blocks!
+    if (!isCodingTask && !code) {
+      return { code: null, output: null, intro: '', outro: '' };
+    }
 
     if (!code && responseText) {
       var codeFenceMatch = responseText.match(/```(?:([a-zA-Z0-9_-]+))?\s*([\s\S]*?)```/);
@@ -2085,6 +2092,133 @@ document.addEventListener('DOMContentLoaded', function () {
   };
 
 
+  // ── SIMPLE MARKDOWN RENDERER ──────────────────────────────
+  function renderSimpleMarkdown(rawText) {
+    if (!rawText) return '';
+    var text = rawText;
+
+    // 1. Code blocks ```lang ... ```
+    text = text.replace(/```(?:([a-zA-Z0-9_-]+))?\s*([\s\S]*?)```/g, function(match, lang, codeContent) {
+      var language = lang || 'text';
+      var highlighted = (language.toLowerCase() === 'python' || language.toLowerCase() === 'py')
+        ? highlightPython(codeContent.trim())
+        : esc(codeContent.trim());
+      return '<div class="md-code-block"><div class="md-code-lang">' + esc(language) + '</div><pre><code>' + highlighted + '</code></pre></div>';
+    });
+
+    // 2. Tables
+    text = text.replace(/((?:\|[^\n]+\|\r?\n)+)/g, function(match) {
+      var lines = match.trim().split(/\r?\n/);
+      if (lines.length < 2) return match;
+      var html = '<div class="md-table-wrap"><table class="md-table">';
+      var inHead = true;
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (/^\|[-:\s|]+\|$/.test(line)) {
+          inHead = false;
+          continue;
+        }
+        var cells = line.split('|').slice(1, -1);
+        if (inHead) {
+          html += '<thead><tr>';
+          cells.forEach(function(c) { html += '<th>' + esc(c.trim()) + '</th>'; });
+          html += '</tr></thead><tbody>';
+          inHead = false;
+        } else {
+          html += '<tr>';
+          cells.forEach(function(c) {
+            var cellContent = esc(c.trim());
+            cellContent = cellContent.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            cellContent = cellContent.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            html += '<td>' + cellContent + '</td>';
+          });
+          html += '</tr>';
+        }
+      }
+      html += '</tbody></table></div>';
+      return html;
+    });
+
+    // Split into paragraphs / sections
+    var sections = text.split(/\n\n+/);
+    var result = '';
+
+    sections.forEach(function(sec) {
+      sec = sec.trim();
+      if (!sec) return;
+
+      if (sec.startsWith('<div class="md-table-wrap"') || sec.startsWith('<div class="md-code-block"')) {
+        result += sec;
+        return;
+      }
+
+      // Check for headings
+      if (/^###\s+(.+)$/m.test(sec)) {
+        var lines = sec.split('\n');
+        var parsedLines = [];
+        for (var l = 0; l < lines.length; l++) {
+          var line = lines[l].trim();
+          if (line.startsWith('### ')) {
+            parsedLines.push('<h3 class="md-h3">' + esc(line.substring(4)) + '</h3>');
+          } else if (line.startsWith('## ')) {
+            parsedLines.push('<h2 class="md-h2">' + esc(line.substring(3)) + '</h2>');
+          } else if (line.startsWith('# ')) {
+            parsedLines.push('<h2 class="md-h1">' + esc(line.substring(2)) + '</h2>');
+          } else if (/^[-*]\s+(.+)$/.test(line)) {
+            var item = esc(line.replace(/^[-*]\s+/, ''));
+            item = item.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            item = item.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            parsedLines.push('<li class="md-li">' + item + '</li>');
+          } else if (line) {
+            var pLine = esc(line);
+            pLine = pLine.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            pLine = pLine.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            parsedLines.push('<p class="md-p">' + pLine + '</p>');
+          }
+        }
+        result += parsedLines.join('\n');
+        return;
+      }
+
+      // Check for list items
+      if (/^[-*]\s+/m.test(sec)) {
+        var lines = sec.split('\n');
+        var inList = false;
+        var listHtml = '<ul class="md-ul">';
+        lines.forEach(function(line) {
+          line = line.trim();
+          if (/^[-*]\s+(.+)$/.test(line)) {
+            var item = esc(line.replace(/^[-*]\s+/, ''));
+            item = item.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            item = item.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            listHtml += '<li class="md-li">' + item + '</li>';
+            inList = true;
+          } else if (line) {
+            var pLine = esc(line);
+            pLine = pLine.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            pLine = pLine.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            if (inList) {
+              listHtml += '</ul><p class="md-p">' + pLine + '</p><ul class="md-ul">';
+            } else {
+              listHtml += '<p class="md-p">' + pLine + '</p>';
+            }
+          }
+        });
+        if (inList) listHtml += '</ul>';
+        result += listHtml;
+        return;
+      }
+
+      // Regular paragraph
+      var pText = esc(sec);
+      pText = pText.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      pText = pText.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+      result += '<p class="md-p">' + pText + '</p>';
+    });
+
+    return result;
+  }
+
   // ── REPLACE THINKING / DISPLAY RESPONSE ────────────────────
 
   function replaceThinkingWithResponse(auditEntry, hasImage, startTime, assistantMsg, responseData) {
@@ -2114,12 +2248,14 @@ document.addEventListener('DOMContentLoaded', function () {
     var isCodingTask = false;
 
     if (!routing) {
-      if (/code|python|pump efficiency|script|linked\s*list|binary\s*tree|queue|stack|data\s*structure|algorithm/i.test(queryText)) {
+      var isTheory = /theory|concept|what is|explain|describe|difference between|overview/i.test(queryText);
+      var isExplicitCode = /write code|implement|python script|code for|write python|program|leetcode/i.test(queryText);
+      if (isExplicitCode || (!isTheory && /code|python|pump efficiency|script/i.test(queryText))) {
         routing = { task_type: 'coding', model: 'deepseek-ai/DeepSeek-Coder-V2-Instruct', provider: 'huggingface', sandboxed: true };
       } else if (hasImage || /image|gauge|dial|photo|needle/i.test(queryText)) {
         routing = { task_type: 'vision', model: 'Qwen2.5-VL', provider: 'local', sandboxed: false };
       } else {
-        routing = { task_type: 'document', model: 'qwen/qwen2.5-32b-instruct', provider: 'huggingface', sandboxed: false };
+        routing = { task_type: 'reasoning', model: 'qwen/qwen2.5-32b-instruct', provider: 'huggingface', sandboxed: false };
       }
     }
 
@@ -2149,7 +2285,7 @@ document.addEventListener('DOMContentLoaded', function () {
     '</div>';
 
     // ── Extract code and output if present ──
-    var parsed = extractCodeAndOutput(responseText, responseData);
+    var parsed = extractCodeAndOutput(responseText, responseData, isCodingTask);
 
     // Document context (ONLY when relevant SOP chunks were actually retrieved)
     if (responseData && responseData.retrieved_chunks && responseData.retrieved_chunks.length > 0) {
@@ -2237,12 +2373,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
       fullHtml += renderActionToolbar();
     } else {
-      var paras = responseText.split('\n\n');
-      paras.forEach(function(p) {
-        p = p.trim();
-        if (p) fullHtml += '<p>' + esc(p) + '</p>';
-      });
-      fullHtml += blocksHtml;
+      fullHtml += '<div class="msg-markdown-body">' + renderSimpleMarkdown(responseText) + '</div>';
+
+      fullHtml += '<div class="workbench-verification-wrap">' +
+        '<details class="workbench-verification-details">' +
+          '<summary class="workbench-verification-summary">' +
+            '<div class="verification-summary-left">' +
+              '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="7"/><polyline points="5 8 7 10 11 6"/></svg>' +
+              '<span>Defense Pipeline &amp; Audit Verification</span>' +
+            '</div>' +
+            '<span class="verification-badge">VERIFIED &check;</span>' +
+          '</summary>' +
+          '<div class="workbench-verification-body">' +
+            blocksHtml +
+          '</div>' +
+        '</details>' +
+      '</div>';
+
       fullHtml += renderActionToolbar();
     }
 

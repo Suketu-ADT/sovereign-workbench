@@ -78,13 +78,35 @@ def classify_task(prompt: str, has_image: bool = False) -> str:
         if not any(re.search(p, prompt_clean) for p in _CODING_PATTERNS):
             return "vision"
 
+    # Check for explicit theoretical / conceptual questions:
+    # If the user asks for theoretical explanations, concepts, overviews, differences, pros/cons,
+    # and does not explicitly ask to write code / implement, route to "reasoning" (Qwen 2.5 72B / 32B)
+    theoretical_patterns = [
+        r"\b(in theory|theoretically|theory of|theory about|theoretical|concept of|conceptually|overview of)\b",
+        r"\b(explain in theory|explain conceptually|explain the theory|explain the concept)\b",
+        r"\b(difference between|compare|pros and cons|advantages and disadvantages|why use)\b",
+        r"\b(what is|what are|explain|describe|how does|how do|principles of|working of|tell me about)\b",
+    ]
+    explicit_code_patterns = [
+        r"\b(write|generate|create|build|implement|develop|solve)\b.*\b(python|code|script|function|class|program|algorithm|leetcode)\b",
+        r"\b(python code|python script|write code|code for|implement in python|show code|give code|run code)\b",
+        r"\bcalculate pump efficiency\b",
+    ]
+    is_theoretical = any(re.search(p, prompt_clean) for p in theoretical_patterns)
+    has_explicit_code = any(re.search(p, prompt_clean) for p in explicit_code_patterns)
+
+    if is_theoretical and not has_explicit_code:
+        return "reasoning"
+
     # Check for debugging keywords
     if any(re.search(p, prompt_clean) for p in _DEBUGGING_PATTERNS):
         return "debugging"
 
     # Check for coding keywords
     if any(re.search(p, prompt_clean) for p in _CODING_PATTERNS):
-        return "coding"
+        if not is_theoretical:
+            return "coding"
+        return "reasoning"
 
     # Check for pure calculation keywords
     if any(re.search(p, prompt_clean) for p in _CALCULATION_PATTERNS):

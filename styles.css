@@ -3943,3 +3943,107 @@ kbd {
   animation: spin 0.8s linear infinite;
 }
 
+/* ── MARKDOWN CONTENT STYLING ── */
+.msg-markdown-body {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-1);
+}
+.msg-markdown-body .md-h1,
+.msg-markdown-body .md-h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #38bdf8;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+.msg-markdown-body .md-h3 {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-top: 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-1);
+  padding-bottom: 4px;
+}
+.msg-markdown-body .md-p {
+  margin-bottom: 10px;
+  color: var(--text-1);
+}
+.msg-markdown-body .md-ul {
+  margin: 6px 0 12px 18px;
+  padding: 0;
+  list-style-type: disc;
+}
+.msg-markdown-body .md-li {
+  margin-bottom: 4px;
+  color: var(--text-1);
+  line-height: 1.55;
+}
+.msg-markdown-body .inline-code {
+  background: rgba(255, 255, 255, 0.08);
+  color: #38bdf8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.msg-markdown-body strong {
+  color: #f1f5f9;
+  font-weight: 600;
+}
+.msg-markdown-body .md-table-wrap {
+  overflow-x: auto;
+  margin: 12px 0;
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+.msg-markdown-body .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  text-align: left;
+}
+.msg-markdown-body .md-table th {
+  background: var(--bg-hover);
+  padding: 8px 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  border-bottom: 1px solid var(--border-2);
+}
+.msg-markdown-body .md-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-1);
+  color: var(--text-2);
+}
+.msg-markdown-body .md-table tr:last-child td {
+  border-bottom: none;
+}
+.msg-markdown-body .md-code-block {
+  margin: 10px 0;
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  background: #0f1218;
+  overflow: hidden;
+}
+.msg-markdown-body .md-code-lang {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border-1);
+  text-transform: uppercase;
+}
+.msg-markdown-body .md-code-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+

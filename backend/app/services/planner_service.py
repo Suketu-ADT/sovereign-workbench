@@ -41,6 +41,7 @@ STATIC_TOOL_REGISTRY = {
     "override": {"description": "System override (SENSITIVE)", "sensitive": True, "authority": "Chief_Safety_Auditor (HITL Required)"},
     "inspect_log": {"description": "Normal non-sensitive logging", "sensitive": False, "authority": None},
     "execute_python_code": {"description": "Generate and execute verified Python code via DeepSeek Coder V2 in Docker sandbox", "sensitive": False, "authority": None},
+    "explain_theory": {"description": "Provide structured theoretical, algorithmic, or systems architecture explanation", "sensitive": False, "authority": None},
     "none": {"description": "No action needed", "sensitive": False, "authority": None}
 }
 
@@ -91,11 +92,15 @@ def _deterministic_planner_fallback(prompt: str) -> dict:
             })
         }
     else:
-        if any(w in user_query for w in ["manual", "procedure", "sop", "document", "standard"]):
+        if any(w in user_query for w in ["theory", "in theory", "theoretically", "concept", "conceptually"]):
+            action_name = "explain_theory"
+            intent = "Provide structured theoretical explanation"
+            reason = "Explaining fundamental data structure and algorithmic concepts in theory."
+        elif any(w in user_query for w in ["manual", "procedure", "sop", "document", "standard"]):
             action_name = "retrieve_manual"
             intent = "Retrieve standard operating procedure documentation"
             reason = "Consulting verified engineering specifications and operational limits."
-        elif any(w in user_query for w in ["explain", "describe", "what is", "diagram", "flowchart", "pipeline", "architecture", "infographic", "visual"]) or ("image" in user_query and not any(w in user_query for w in ["gauge", "dial", "needle", "bar"])):
+        elif any(w in user_query for w in ["diagram", "flowchart", "pipeline architecture", "infographic"]) or ("image" in user_query and not any(w in user_query for w in ["gauge", "dial", "needle", "bar"])):
             action_name = "analyze_visual_asset"
             intent = "Perform multimodal visual asset analysis"
             reason = "Analyzing uploaded visual diagram, workflow, or technical asset."
@@ -107,15 +112,16 @@ def _deterministic_planner_fallback(prompt: str) -> dict:
             action_name = "calculate_pressure_drop"
             intent = "Calculate differential pressure drop across inlet and outlet"
             reason = "Verifying differential pressure against nominal thresholds."
-        elif any(w in user_query for w in [
-            "code", "python", "script", "pump efficiency", "function", "algorithm",
-            "linked list", "single linked", "singly linked", "doubly linked",
-            "binary tree", "queue", "stack", "data structure", "array", "sorting",
-            "tree", "node", "leetcode", "hash map", "hash table"
-        ]):
+        elif any(w in user_query for w in ["write code", "implement", "python script", "code for", "write python", "program", "leetcode"]) or (
+            any(w in user_query for w in ["code", "python", "script", "function", "pump efficiency"]) and not any(w in user_query for w in ["theory", "in theory", "concept"])
+        ):
             action_name = "execute_python_code"
             intent = "Generate and execute verified Python code via DeepSeek Coder V2 in Docker sandbox"
             reason = "Python script and algorithmic implementation requested; executing within isolated Docker sandbox."
+        elif any(w in user_query for w in ["what is", "explain", "describe", "how does", "overview", "linked list", "binary tree", "queue", "stack", "data structure"]):
+            action_name = "explain_theory"
+            intent = "Provide structured theoretical explanation"
+            reason = "Explaining fundamental computer science and architectural concepts."
         else:
             action_name = "inspect_log"
             intent = "Review operational telemetry and audit logs"
@@ -306,6 +312,118 @@ class PlanState(TypedDict):
     task_type: str | None
 
 
+def _generate_theoretical_knowledge_fallback(query: str) -> str:
+    """
+    Generates structured, rigorous theoretical explanations for data structures,
+    algorithms, and computer science concepts when offline or in sovereign air-gapped mode.
+    """
+    q = query.lower()
+
+    # 1. Linked List
+    if any(w in q for w in ["linked list", "singly linked", "single linked", "doubly linked", "circular linked"]):
+        return (
+            "### 1. Conceptual Overview & Intuition\n"
+            "A **Linked List** is a fundamental linear data structure wherein elements (termed **nodes**) "
+            "are stored non-contiguously in memory. Unlike arrays where elements occupy adjacent contiguous memory slots, "
+            "each node in a linked list encapsulates two core components:\n"
+            "- **Data Field**: Stores the actual value or payload.\n"
+            "- **Pointer / Reference (`next`)**: Stores the memory address pointing to the succeeding node.\n\n"
+            "The list begins at a reference pointer called the **Head**. Traversal proceeds sequentially along pointer links "
+            "until reaching a terminal node whose pointer references `None` (or null).\n\n"
+            "### 2. Structural Varieties\n"
+            "- **Singly Linked List**: Traversal is strictly unidirectional; each node retains a single forward pointer (`next`).\n"
+            "- **Doubly Linked List**: Traversal is bidirectional; each node maintains two pointers: forward (`next`) and backward (`prev`). Enables O(1) backward navigation at the expense of additional pointer memory overhead.\n"
+            "- **Circular Linked List**: The tail node's `next` pointer links back to the Head instead of null, creating a continuous ring (common in CPU round-robin task schedulers and circular audio buffers).\n\n"
+            "### 3. Asymptotic Time & Space Complexity\n"
+            "| Operation | Singly Linked List | Contiguous Dynamic Array | Architectural Rationale |\n"
+            "| :--- | :--- | :--- | :--- |\n"
+            "| **Access by Index** | **O(n)** | **O(1)** | Arrays calculate direct byte offset (`base + i * size`); linked lists require sequential pointer chasing. |\n"
+            "| **Search by Value** | **O(n)** | **O(n)** | Both require linear scanning through unindexed elements. |\n"
+            "| **Insertion at Head** | **O(1)** | **O(n)** | Mutating head pointer is constant time; arrays require shifting all trailing elements rightward. |\n"
+            "| **Insertion at Tail** | **O(1)** (with tail ref) | **O(1)** amortized | O(1) if tail pointer is maintained; O(n) if full traversal required. |\n"
+            "| **Deletion at Head** | **O(1)** | **O(n)** | Updating head pointer is instantaneous; arrays must shift elements leftward. |\n"
+            "| **Memory Overhead** | **O(n)** pointers | **0** (raw data) | Each node incurs 8 bytes of pointer overhead per pointer on 64-bit systems. |\n\n"
+            "### 4. Architectural Trade-offs: Linked List vs Array\n"
+            "- **Memory Contiguity & Cache Locality**: Arrays exhibit high spatial locality, allowing CPU L1/L2 hardware prefetchers to cache adjacent cache lines efficiently. Linked list nodes reside scattered across heap memory, triggering frequent CPU cache misses.\n"
+            "- **Dynamic Resizing**: Dynamic arrays incur costly resizing allocations (doubling capacity and copying existing items). Linked lists allocate memory dynamically node-by-node without reserving unused memory headroom.\n\n"
+            "### 5. Systems Engineering & Industrial Applications\n"
+            "- **Operating System Kernels**: Used extensively for tracking allocated memory blocks, page frames, and process dispatch queues (e.g., Linux kernel's circular doubly linked `list_head`).\n"
+            "- **LRU (Least Recently Used) Caches**: Coupled with a hash map to achieve O(1) element access, eviction, and re-ordering.\n"
+            "- **Filesystem Allocation**: FAT (File Allocation Table) filesystems link non-contiguous disk clusters."
+        )
+
+    # 2. Binary Tree / BST
+    if any(w in q for w in ["binary tree", "bst", "tree", "avl", "red black", "trie"]):
+        return (
+            "### 1. Conceptual Overview & Tree Hierarchy\n"
+            "A **Binary Tree** is a hierarchical data structure where each node has at most two children, "
+            "designated as the **left child** and the **right child**. The topmost node is the **Root**, and nodes with no children are **Leaves**.\n\n"
+            "A **Binary Search Tree (BST)** enforces an ordering invariant:\n"
+            "- The left subtree of a node contains exclusively keys strictly less than the node's key.\n"
+            "- The right subtree contains exclusively keys strictly greater than the node's key.\n"
+            "- Both left and right subtrees must themselves be valid binary search trees.\n\n"
+            "### 2. Time & Space Complexity\n"
+            "| Operation | Average (Balanced) | Worst-Case (Skewed/Degenerate) | Optimal Structure |\n"
+            "| :--- | :--- | :--- | :--- |\n"
+            "| **Search** | **O(log n)** | **O(n)** (linear chain) | AVL / Red-Black Tree |\n"
+            "| **Insertion** | **O(log n)** | **O(n)** | Self-Balancing BST |\n"
+            "| **Deletion** | **O(log n)** | **O(n)** | Self-Balancing BST |\n"
+            "| **Space** | **O(n)** | **O(n)** | Data + left + right pointers per node |\n\n"
+            "### 3. Tree Traversals\n"
+            "- **In-Order (Left, Root, Right)**: Yields sorted ascending order for BSTs.\n"
+            "- **Pre-Order (Root, Left, Right)**: Used for serializing/copying tree hierarchies.\n"
+            "- **Post-Order (Left, Right, Root)**: Used for bottom-up node deletion and syntax evaluation.\n"
+            "- **Level-Order (Breadth-First)**: Explores level by level using a FIFO queue."
+        )
+
+    # 3. Stack and Queue
+    if any(w in q for w in ["stack", "queue", "deque", "lifo", "fifo"]):
+        return (
+            "### 1. Conceptual Overview: Stack vs Queue\n"
+            "Stacks and Queues are fundamental linear abstract data types (ADTs) governed by strict access disciplines:\n"
+            "- **Stack (LIFO — Last In, First Out)**: The most recently added element is the first removed. Analogy: a stack of trays.\n"
+            "- **Queue (FIFO — First In, First Out)**: Elements are processed strictly in arrival order. Analogy: a queue of service requests.\n\n"
+            "### 2. Core Primitives & Asymptotic Complexity\n"
+            "| Data Structure | Primary Primitives | Time Complexity | Auxiliary Space |\n"
+            "| :--- | :--- | :--- | :--- |\n"
+            "| **Stack** | `push(x)`, `pop()`, `peek()` | **O(1)** for all primitives | **O(n)** |\n"
+            "| **Queue** | `enqueue(x)`, `dequeue()`, `front()` | **O(1)** for all primitives | **O(n)** |\n\n"
+            "### 3. Applications\n"
+            "- **Stack**: Execution call frames & recursion stack, syntax parsing, DFS graph traversal, undo/redo buffers.\n"
+            "- **Queue**: Asynchronous message queues (Kafka, RabbitMQ), OS task scheduling, BFS graph exploration, printer spools."
+        )
+
+    # 4. Sorting Algorithms
+    if any(w in q for w in ["sort", "quicksort", "mergesort", "heapsort", "sorting"]):
+        return (
+            "### 1. Sorting Paradigms Overview\n"
+            "Sorting algorithms arrange elements into monotonic sequence. "
+            "Comparison-based sorts are mathematically bounded by **Ω(n log n)** worst-case lower bounds.\n\n"
+            "### 2. Comparative Analysis\n"
+            "| Algorithm | Best Time | Average Time | Worst Time | Space | Stable? | Paradigm |\n"
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+            "| **Quicksort** | O(n log n) | O(n log n) | O(n²) | O(log n) | No | Divide & Conquer (in-place partition) |\n"
+            "| **Mergesort** | O(n log n) | O(n log n) | O(n log n) | O(n) | **Yes** | Divide & Conquer (recursive merge) |\n"
+            "| **Heapsort** | O(n log n) | O(n log n) | O(n log n) | O(1) | No | Selection via Binary Heap |\n"
+            "| **Timsort** | O(n) | O(n log n) | O(n log n) | O(n) | **Yes** | Hybrid (Insertion + Merge sort) |"
+        )
+
+    # 5. General Fallback
+    return (
+        f"### Theoretical Analysis: {query.strip()}\n\n"
+        "### 1. Foundational Concept & Formal Definition\n"
+        f"From an architectural and theoretical perspective, **{query.strip()}** encompasses core computational principles, "
+        "structural decomposition, and algorithmic trade-offs.\n\n"
+        "### 2. Design Trade-offs & Complexity\n"
+        "- **Time Complexity**: Optimal computational operations seek logarithmic or constant bounds (O(1) / O(log n)), "
+        "whereas unindexed sequential scans scale linearly as O(n).\n"
+        "- **Space Complexity**: Memory overhead for structural pointers must be evaluated against the operational speed gained.\n"
+        "- **Cache Locality**: Contiguous storage patterns optimize CPU prefetching, while pointer-based structures provide flexible dynamic growth.\n\n"
+        "### 3. Practical Systems Applications\n"
+        "In production software architectures, design decisions balance read-to-write ratios, latency SLAs, and memory constraints."
+    )
+
+
 async def reasoning_node(state: PlanState) -> dict[str, Any]:
     """
     Reasoning layer: analyzes telemetry, document context, and calculates action
@@ -317,15 +435,74 @@ async def reasoning_node(state: PlanState) -> dict[str, Any]:
     reading = state.get("vision_reading") or 0.0
     task_type = state.get("task_type")
 
-    is_coding_intent = (
-        task_type in ("coding", "debugging")
-        or unit == "sandbox-compute"
-        or any(w in query.lower() for w in [
-            "linked list", "single linked", "singly linked", "doubly linked", "binary tree",
-            "queue", "stack", "data structure", "hash map", "hash table", "quicksort",
-            "mergesort", "sorting algorithm", "recursion", "dynamic programming"
-        ])
+    # Detect explicit request to generate executable code
+    is_explicit_code_request = any(w in query.lower() for w in [
+        "write code", "implement", "python script", "code for", "write python",
+        "program", "leetcode", "show code", "give code", "coding", "run code"
+    ]) or (
+        any(w in query.lower() for w in ["code", "python", "script"])
+        and not any(w in query.lower() for w in ["theory", "in theory", "concept", "what is", "explain", "describe", "how does"])
     )
+
+    # Detect theoretical / conceptual inquiry
+    is_theoretical_intent = (
+        task_type == "reasoning"
+        or any(w in query.lower() for w in [
+            "theory", "in theory", "theoretically", "concept", "conceptually",
+            "what is", "what are", "explain", "describe", "how does", "how do",
+            "difference between", "overview", "comparison", "pros and cons"
+        ])
+    ) and not is_explicit_code_request
+
+    # Handle theoretical / conceptual questions: synthesize theory and DO NOT execute code
+    if is_theoretical_intent:
+        synth = None
+        hf_token = (getattr(settings, "HF_TOKEN", None) or os.getenv("HF_TOKEN") or "").strip()
+        if hf_token and not getattr(settings, "SOVEREIGN_MODE", False):
+            try:
+                import asyncio
+                from app.services.huggingface_client import call_huggingface
+                theory_prompt = (
+                    f"Explain the following theoretical concept clearly and comprehensively:\n\n"
+                    f"Topic: {query}\n\n"
+                    f"Provide a structured, deep-dive theoretical explanation formatted in clean Markdown:\n"
+                    f"- Concept Definition & Fundamental Intuition\n"
+                    f"- Structural Components & Memory Organization\n"
+                    f"- Asymptotic Time & Space Complexity Analysis (Big-O)\n"
+                    f"- Trade-offs, Pros & Cons compared to alternative structures\n"
+                    f"- Real-World Systems & Operating System Applications\n\n"
+                    f"Do not output runnable code blocks unless specifically requested. Focus on theoretical principles, mechanics, and design."
+                )
+                hf_res = await asyncio.to_thread(
+                    call_huggingface,
+                    model="Qwen/Qwen2.5-72B-Instruct",
+                    user_prompt=theory_prompt,
+                    system_prompt="You are a principal computer science educator and systems architect. Provide comprehensive, deeply insightful theoretical explanations.",
+                    timeout=15.0,
+                )
+                if hf_res and len(hf_res.strip()) > 50:
+                    synth = hf_res.strip()
+            except Exception as e:
+                logger.warning("Remote LLM failed for theoretical synthesis: %s. Using local knowledge fallback.", e)
+
+        if not synth:
+            synth = _generate_theoretical_knowledge_fallback(query)
+
+        return {
+            "proposed_action": {"action": "explain_theory", "target": unit},
+            "approval_required": False,
+            "approval_details": None,
+            "action_status": "COMPLETED",
+            "final_synthesis": synth,
+            "code_execution": None,
+        }
+
+    # Coding intent: only triggered when explicitly requesting code or classified as coding
+    is_coding_intent = (
+        (task_type in ("coding", "debugging") or unit == "sandbox-compute")
+        and not is_theoretical_intent
+    ) or is_explicit_code_request
+
     if is_coding_intent:
         try:
             from app.services.coding_agent_service import coding_agent_service

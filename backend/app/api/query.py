@@ -166,13 +166,18 @@ async def submit_query(
         "sop", "manual", "pressure", "temperature", "drum", "bms", "feedwater",
         "clearance", "actuator", "flange", "gauge", "telemetry"
     ])
-    if has_image_requested and not is_gauge_query(body.text) and not is_plant_related:
+    is_coding_task = routing.get("task_type") in ("coding", "debugging")
+    if is_coding_task:
         retrieved_chunks = []
-    else:
+    elif has_image_requested and not is_gauge_query(body.text) and not is_plant_related:
+        retrieved_chunks = []
+    elif is_plant_related or any(k in lower_text for k in ["sop", "manual", "procedure", "spec", "standard"]):
         retrieved_chunks = retrieval_service.retrieve(
             query=body.text,
             operator_clearance=clearance,
         )
+    else:
+        retrieved_chunks = []
 
     # Determine equipment unit from query context
     if "reactor" in lower_text:
@@ -181,6 +186,10 @@ async def submit_query(
         unit = "turbine-gen-4"
     elif has_image_requested and not is_gauge_query(body.text):
         unit = "visual-asset"
+    elif is_coding_task:
+        unit = "sandbox-compute"
+    elif routing.get("task_type") == "reasoning" and not is_plant_related:
+        unit = "reasoning-core"
     else:
         unit = "boiler-102"
 
@@ -220,6 +229,7 @@ async def submit_query(
         pressure_drop=calc_result.pressure_drop if calc_result else None,
         vision_analysis=vision_analysis,
         vision_explanation=vision_analysis.get("explanation") if vision_analysis else None,
+        task_type=routing.get("task_type"),
     )
 
     is_awaiting_approval = bool(plan_result.get("approval_required"))
@@ -578,15 +588,13 @@ async def stream_query(
             retrieved_chunks = []
         elif has_image and not is_gauge_query(body.text) and not is_plant_related:
             retrieved_chunks = []
-        elif not is_plant_related and any(cs in lower_text for cs in [
-            "linked list", "binary tree", "queue", "stack", "data structure", "algorithm", "python", "code", "syntax"
-        ]):
-            retrieved_chunks = []
-        else:
+        elif is_plant_related or any(k in lower_text for k in ["sop", "manual", "procedure", "spec", "standard"]):
             retrieved_chunks = retrieval_service.retrieve(
                 query=body.text,
                 operator_clearance=clearance,
             )
+        else:
+            retrieved_chunks = []
 
         if "reactor" in lower_text:
             unit = "reactor-core-aux"
@@ -596,6 +604,8 @@ async def stream_query(
             unit = "sandbox-compute"
         elif has_image and not is_gauge_query(body.text):
             unit = "visual-asset"
+        elif routing.get("task_type") == "reasoning" and not is_plant_related:
+            unit = "reasoning-core"
         else:
             unit = "boiler-102"
 
