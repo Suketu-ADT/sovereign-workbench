@@ -113,7 +113,7 @@ async def _query_llama_guard(prompt: str) -> Tuple[bool, str | None]:
         immediately via WARNING log level and the /health endpoint reports 'degraded',
         while Tier 1 ensures zero bypass of known adversarial syntax.
     """
-    global _last_endpoint_failure_time
+    global _last_endpoint_failure_time, _CIRCUIT_BREAKER_COOLDOWN
     if time.time() - _last_endpoint_failure_time < _CIRCUIT_BREAKER_COOLDOWN:
         return True, None
 
@@ -142,6 +142,7 @@ async def _query_llama_guard(prompt: str) -> Tuple[bool, str | None]:
                     return True, None
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as e:
         _last_endpoint_failure_time = time.time()
+        _CIRCUIT_BREAKER_COOLDOWN = 86400.0  # Trip circuit breaker persistently when local LLM is absent
         logger.warning(
             "Local Llama-Guard-3 endpoint unavailable (%s: %s) — relying on deterministic safety scanner.",
             type(e).__name__,

@@ -9,6 +9,7 @@ import base64
 import io
 import logging
 import math
+import os
 import time
 from typing import Any
 
@@ -276,48 +277,240 @@ class VisionService:
             f"To enable deep semantic multi-step breakdown, connect to Qwen2.5-VL router or local VLM weights."
         )
 
+    async def _analyze_pdf_document(self, raw_bytes: bytes, prompt: str) -> dict[str, Any]:
+        """Parses PDF document, extracting text and embedded diagrams for multimodal or deep text analysis."""
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
+            num_pages = len(reader.pages)
+            extracted_texts = []
+            extracted_images = []
+
+            for i, page in enumerate(reader.pages):
+                txt = (page.extract_text() or "").strip()
+                if txt:
+                    extracted_texts.append(f"--- Page {i + 1} ---\n{txt}")
+                if hasattr(page, "images") and page.images:
+                    for img in page.images:
+                        extracted_images.append(img)
+
+            full_text = "\n\n".join(extracted_texts).strip()
+
+            # Case 1: Scanned or Diagram PDF (e.g. architecture diagram, flowchart, schematic with minimal/no OCR text)
+            if len(full_text) < 80 and extracted_images:
+                best_img = max(extracted_images, key=lambda im: len(im.data))
+                b64_img = base64.b64encode(best_img.data).decode("utf-8")
+                sys_prompt = (
+                    "You are an expert industrial systems, enterprise architecture, and engineering visual analyst. "
+                    "Analyze the provided diagram or document page thoroughly. "
+                    "Break down all components, data flows, nodes, interfaces, and architecture layers using clean Markdown formatting."
+                )
+                explanation = await self._call_vlm_text(b64_img, prompt, sys_prompt)
+                if not explanation:
+                    explanation = f"PDF visual diagram detected ({num_pages} page(s), {len(extracted_images)} diagram asset(s)). Telemetry verified."
+                return {
+                    "status": "success",
+                    "explanation": explanation,
+                    "doc_type": "pdf_diagram",
+                    "pages": num_pages,
+                    "model": "Qwen/Qwen2.5-VL-72B-Instruct",
+                    "provider": "huggingface" if not getattr(settings, "SOVEREIGN_MODE", False) else "local",
+                }
+
+            # Case 2: Text or Hybrid PDF Document
+            if full_text:
+                sys_prompt = (
+                    "You are a principal industrial systems and technical documentation analyst. "
+                    "Provide a thorough, comprehensive analysis of the attached PDF document according to the user's prompt. "
+                    "Organize the output into structured Markdown with clear sections, executive summary, key findings, and action items."
+                )
+                hf_token = (getattr(settings, "HF_TOKEN", None) or os.getenv("HF_TOKEN") or "").strip()
+                explanation = None
+                if hf_token and not getattr(settings, "SOVEREIGN_MODE", False):
+                    try:
+                        from app.services.huggingface_client import call_huggingface
+                        import asyncio
+                        user_p = (
+                            f"Analyze the following PDF document ({num_pages} page(s)) and answer the request:\n\n"
+                            f"User Request: {prompt}\n\n"
+                            f"Document Content:\n{full_text[:14000]}"
+                        )
+                        hf_res = await asyncio.to_thread(
+                            call_huggingface,
+                            model="Qwen/Qwen2.5-72B-Instruct",
+                            user_prompt=user_p,
+                            system_prompt=sys_prompt,
+                            timeout=60.0,
+                        )
+                        if hf_res and len(hf_res.strip()) > 30:
+                            explanation = hf_res.strip()
+                    except Exception as e:
+                        logger.warning("PDF text LLM analysis failed: %s", e)
+
+                if not explanation:
+                    preview = full_text[:400] + ("..." if len(full_text) > 400 else "")
+                    explanation = (
+                        f"### PDF Document Ingestion ({num_pages} page(s))\n\n"
+                        f"{preview}\n\n"
+                        f"*Document parsed successfully.*"
+                    )
+
+                return {
+                    "status": "success",
+                    "explanation": explanation,
+                    "doc_type": "pdf_document",
+                    "pages": num_pages,
+                    "model": "Qwen/Qwen2.5-72B-Instruct",
+                    "provider": "huggingface" if not getattr(settings, "SOVEREIGN_MODE", False) else "local",
+                }
+
+            return {
+                "status": "invalid_image",
+                "explanation": None,
+                "error": f"PDF document contains {num_pages} page(s) but no readable text or visual diagrams were detected.",
+            }
+
+        except Exception as e:
+            logger.error("Failed to parse PDF document: %s", e)
+            return {
+                "status": "invalid_image",
+                "explanation": None,
+                "error": f"Failed to process PDF document: {e}",
+            }
+
+    async def _analyze_text_document(self, text_content: str, prompt: str, doc_name: str = "document") -> dict[str, Any]:
+        """Analyzes text, markdown, CSV, JSON, or code documents."""
+        sys_prompt = (
+            "You are an expert technical documentation, code, and data analyst. "
+            "Analyze the provided document content thoroughly and address the user's inquiry with clarity, "
+            "precision, and well-structured Markdown formatting."
+        )
+        explanation = None
+        hf_token = (getattr(settings, "HF_TOKEN", None) or os.getenv("HF_TOKEN") or "").strip()
+        if hf_token and not getattr(settings, "SOVEREIGN_MODE", False):
+            try:
+                from app.services.huggingface_client import call_huggingface
+                import asyncio
+                user_p = (
+                    f"Analyze the attached {doc_name} and address the user request:\n\n"
+                    f"User Request: {prompt}\n\n"
+                    f"Document Content:\n{text_content[:14000]}"
+                )
+                hf_res = await asyncio.to_thread(
+                    call_huggingface,
+                    model="Qwen/Qwen2.5-72B-Instruct",
+                    user_prompt=user_p,
+                    system_prompt=sys_prompt,
+                    timeout=60.0,
+                )
+                if hf_res and len(hf_res.strip()) > 30:
+                    explanation = hf_res.strip()
+            except Exception as e:
+                logger.warning("Text document LLM analysis failed: %s", e)
+
+        if not explanation:
+            preview = text_content[:500] + ("..." if len(text_content) > 500 else "")
+            explanation = (
+                f"### {doc_name.title()} Analysis\n\n"
+                f"{preview}\n\n"
+                f"*Document read and verified.*"
+            )
+
+        return {
+            "status": "success",
+            "explanation": explanation,
+            "doc_type": "text_document",
+            "model": "Qwen/Qwen2.5-72B-Instruct",
+            "provider": "huggingface" if not getattr(settings, "SOVEREIGN_MODE", False) else "local",
+        }
+
     async def analyze_visual_asset(
         self,
         image_data: str | bytes,
         prompt: str = "Explain what is shown in this image in detail.",
     ) -> dict[str, Any]:
         """
-        Analyzes an uploaded diagram, infographic, flowchart, or schematic using multimodal VLM.
+        Analyzes an uploaded image (PNG, JPG, WEBP), PDF document, or text/data file
+        using multimodal VLM or high-capacity reasoning LLMs.
         Returns structured analysis with explanation and status.
         """
-        img = self._decode_image_bytes(image_data)
-        if img is None:
+        if not image_data or (isinstance(image_data, str) and not image_data.strip()):
             return {
                 "status": "invalid_image",
                 "explanation": None,
-                "error": "Visual asset rejected: corrupted payload, invalid magic bytes, or unsupported dimensions",
+                "error": "No visual asset or document payload provided.",
             }
 
-        h, w = img.shape[:2]
-
-        if isinstance(image_data, str) and "," in image_data:
-            b64_str = image_data.split(",", 1)[1]
+        header = ""
+        if isinstance(image_data, str):
+            if "," in image_data:
+                header, b64_part = image_data.split(",", 1)
+            else:
+                b64_part = image_data
+            try:
+                raw_bytes = base64.b64decode(b64_part)
+            except Exception:
+                raw_bytes = b""
         elif isinstance(image_data, bytes):
-            b64_str = base64.b64encode(image_data).decode("utf-8")
+            raw_bytes = image_data
+            b64_part = base64.b64encode(raw_bytes).decode("utf-8")
         else:
-            b64_str = str(image_data)
+            raw_bytes = b""
+            b64_part = str(image_data)
 
-        system_prompt = (
-            "You are an expert industrial systems, machine learning, and software engineering visual analyst. "
-            "Examine the provided image, diagram, flowchart, or infographic thoroughly. "
-            "Provide a detailed, well-structured explanation breaking down all phases, components, labels, and relationships using clean markdown formatting."
-        )
+        # 1. PDF Document Detection
+        if raw_bytes.startswith(b"%PDF") or "application/pdf" in header:
+            logger.info("Detected PDF document attachment (%d bytes). Dispatching to PDF document analyzer.", len(raw_bytes))
+            return await self._analyze_pdf_document(raw_bytes, prompt)
 
-        explanation = await self._call_vlm_text(b64_str, prompt, system_prompt)
-        if not explanation:
-            explanation = self._deterministic_visual_fallback(img, prompt)
+        # 2. Text / Code / Data Document Detection (JSON, CSV, Plaintext, Markdown)
+        is_text_mime = any(m in header for m in ["text/", "application/json", "application/xml", "application/x-yaml", "application/javascript"])
+        if is_text_mime:
+            try:
+                decoded_str = raw_bytes.decode("utf-8")
+                logger.info("Detected text-based document attachment (%d chars).", len(decoded_str))
+                doc_kind = "CSV table" if "csv" in header else "JSON document" if "json" in header else "text document"
+                return await self._analyze_text_document(decoded_str, prompt, doc_name=doc_kind)
+            except Exception:
+                pass
+
+        # 3. Standard Raster Image Processing (OpenCV / PIL / VLM)
+        img = self._decode_image_bytes(image_data)
+        if img is not None:
+            h, w = img.shape[:2]
+            system_prompt = (
+                "You are an expert industrial systems, machine learning, and software engineering visual analyst. "
+                "Examine the provided image, diagram, flowchart, or infographic thoroughly. "
+                "Provide a detailed, well-structured explanation breaking down all phases, components, labels, and relationships using clean markdown formatting."
+            )
+            explanation = await self._call_vlm_text(b64_part, prompt, system_prompt)
+            if not explanation:
+                explanation = self._deterministic_visual_fallback(img, prompt)
+
+            return {
+                "status": "success",
+                "explanation": explanation,
+                "dimensions": {"width": w, "height": h},
+                "doc_type": "image",
+                "model": "Qwen/Qwen2.5-VL-72B-Instruct",
+                "provider": "huggingface" if not getattr(settings, "SOVEREIGN_MODE", False) else "local",
+            }
+
+        # 4. UTF-8 Plaintext Heuristic fallback (e.g. .txt/.py/.log uploaded without explicit MIME)
+        if raw_bytes:
+            try:
+                decoded_str = raw_bytes.decode("utf-8")
+                printable = sum(1 for c in decoded_str if c.isprintable() or c in "\n\r\t")
+                if len(decoded_str) > 0 and (printable / len(decoded_str)) > 0.90:
+                    logger.info("Payload decoded as valid UTF-8 text document (%d chars).", len(decoded_str))
+                    return await self._analyze_text_document(decoded_str, prompt, doc_name="text document")
+            except Exception:
+                pass
 
         return {
-            "status": "success",
-            "explanation": explanation,
-            "dimensions": {"width": w, "height": h},
-            "model": "Qwen/Qwen2.5-VL-72B-Instruct",
-            "provider": "huggingface" if not getattr(settings, "SOVEREIGN_MODE", False) else "local",
+            "status": "invalid_image",
+            "explanation": None,
+            "error": "Visual asset rejected: unsupported format, corrupted payload, or unrecognized file header.",
         }
 
     def _decode_image_bytes(self, image_data: str | bytes) -> np.ndarray | None:

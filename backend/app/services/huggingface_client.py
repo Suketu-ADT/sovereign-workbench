@@ -36,7 +36,7 @@ def get_client() -> OpenAI:
         _client = OpenAI(
             base_url=base_url,
             api_key=token,
-            timeout=30.0,
+            timeout=60.0,
             max_retries=2,
         )
     return _client
@@ -48,7 +48,7 @@ if HF_TOKEN:
         client = OpenAI(
             base_url=HF_BASE_URL,
             api_key=HF_TOKEN,
-            timeout=30.0,
+            timeout=60.0,
             max_retries=2,
         )
         _client = client
@@ -69,23 +69,34 @@ def _sanitize(msg: str) -> str:
     return s
 
 
+_HF_MODEL_ALIASES = {
+    "qwen/qwen2.5-32b-instruct": "Qwen/Qwen2.5-72B-Instruct",
+    "qwen/qwen-2.5-vl-72b-instruct": "Qwen/Qwen2.5-VL-72B-Instruct",
+    "qwen2.5:32b": "Qwen/Qwen2.5-72B-Instruct",
+    "qwen2.5-32b-instruct": "Qwen/Qwen2.5-72B-Instruct",
+    "qwen2.5-vl": "Qwen/Qwen2.5-VL-72B-Instruct",
+    "deepseek-coder-v2": "Qwen/Qwen2.5-Coder-32B-Instruct",
+}
+
+
 def call_huggingface(
     model: str,
     user_prompt: str | list[dict],
     system_prompt: str = "You are a helpful AI assistant.",
-    timeout: float = 45.0,
-) -> str:
+    timeout: float = 60.0,
+):
     """
     Calls a model via Hugging Face Inference Providers OpenAI-compatible endpoint.
     Handles timeouts, connection retries, and sanitizes all error messages to ensure zero credential leakage.
     Supports both text queries and multimodal content blocks.
     """
     active_client = get_client()
+    target_model = _HF_MODEL_ALIASES.get(model.lower().strip(), model)
 
-    logger.info("Dispatching request to Hugging Face model router for model: %s", model)
+    logger.info("Dispatching request to Hugging Face model router for model: %s", target_model)
     try:
         response = active_client.chat.completions.create(
-            model=model,
+            model=target_model,
             messages=[
                 {
                     "role": "system",
@@ -140,7 +151,7 @@ def call_huggingface_vision(
     prompt: str,
     image_b64: str,
     system_prompt: str = "You are an expert multimodal visual analyst.",
-    timeout: float = 45.0,
+    timeout: float = 60.0,
 ) -> str:
     """
     Multimodal visual inference helper dispatching image + text prompt to vision-language models.

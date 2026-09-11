@@ -742,24 +742,33 @@ async def stream_query(
                 )
                 elapsed = int((time.time() - t_step) * 1000)
                 if vision_analysis.get("status") == "success":
+                    doc_type = vision_analysis.get("doc_type", "image")
+                    doc_label = (
+                        "PDF Document" if doc_type == "pdf_document"
+                        else "PDF Visual Diagram" if doc_type == "pdf_diagram"
+                        else "Structured Document" if doc_type == "text_document"
+                        else "Multimodal Visual Asset"
+                    )
+                    model_label = vision_analysis.get("model", "Qwen2.5-VL")
+
                     async with async_session_factory() as db:
                         async with audit_service.audit_transaction(db):
                             await audit_service.append_entry(
                                 db=db,
                                 event_type="VISION_ANALYSIS",
-                                detail="Multimodal visual analysis complete (Qwen2.5-VL-72B)",
+                                detail=f"{doc_label} analysis complete ({model_label})",
                                 actor_user_id=user_id,
                             )
                             await db.commit()
 
                     expl = vision_analysis.get("explanation") or ""
-                    first_line = next((line.strip("#* -") for line in expl.split("\n") if line.strip()), "Visual diagram analyzed")
+                    first_line = next((line.strip("#* -") for line in expl.split("\n") if line.strip()), f"{doc_label} analyzed")
                     preview = (first_line[:75] + "...") if len(first_line) > 75 else first_line
 
                     yield _sse_event("step_complete", {
                         "step": "vision",
                         "status": "passed",
-                        "readout": f"Multimodal analysis complete (Qwen2.5-VL) — {preview}",
+                        "readout": f"{doc_label} analyzed ({model_label.split('/')[-1]}) — {preview}",
                         "vision_analysis": vision_analysis,
                         "elapsed_ms": elapsed,
                     })

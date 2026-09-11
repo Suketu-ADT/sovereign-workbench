@@ -172,7 +172,7 @@ async def _call_llm_planner(prompt: str) -> dict:
                 model=hf_model,
                 user_prompt=prompt,
                 system_prompt=system_msg,
-                timeout=settings.PLANNER_TIMEOUT,
+                timeout=max(getattr(settings, "PLANNER_TIMEOUT", 30.0), 60.0),
             )
             if raw_text:
                 cleaned = raw_text.strip()
@@ -435,6 +435,20 @@ async def reasoning_node(state: PlanState) -> dict[str, Any]:
     reading = state.get("vision_reading") or 0.0
     task_type = state.get("task_type")
 
+    # Multimodal Visual Asset or Document Analysis: return synthesis directly if already completed
+    vis_expl = state.get("vision_explanation")
+    if not vis_expl and state.get("vision_analysis"):
+        vis_expl = (state.get("vision_analysis") or {}).get("explanation")
+    if vis_expl and (unit == "visual-asset" or not state.get("retrieved_docs") or any(k in query.lower() for k in ["image", "photo", "document", "pdf", "diagram", "chart", "flowchart", "schematic"])):
+        return {
+            "proposed_action": {"action": "analyze_visual_asset", "target": unit},
+            "approval_required": False,
+            "approval_details": None,
+            "action_status": "COMPLETED",
+            "final_synthesis": vis_expl,
+            "code_execution": None,
+        }
+
     # Detect explicit request to generate executable code
     is_explicit_code_request = any(w in query.lower() for w in [
         "write code", "implement", "python script", "code for", "write python",
@@ -444,15 +458,19 @@ async def reasoning_node(state: PlanState) -> dict[str, Any]:
         and not any(w in query.lower() for w in ["theory", "in theory", "concept", "what is", "explain", "describe", "how does"])
     )
 
-    # Detect theoretical / conceptual inquiry
+    # Detect theoretical / conceptual inquiry (only for text-only queries without visual assets)
     is_theoretical_intent = (
-        task_type == "reasoning"
-        or any(w in query.lower() for w in [
-            "theory", "in theory", "theoretically", "concept", "conceptually",
-            "what is", "what are", "explain", "describe", "how does", "how do",
-            "difference between", "overview", "comparison", "pros and cons"
-        ])
-    ) and not is_explicit_code_request
+        (
+            task_type == "reasoning"
+            or any(w in query.lower() for w in [
+                "theory", "in theory", "theoretically", "concept", "conceptually",
+                "what is", "what are", "explain", "describe", "how does", "how do",
+                "difference between", "overview", "comparison", "pros and cons"
+            ])
+        )
+        and not is_explicit_code_request
+        and not vis_expl
+    )
 
     # Handle theoretical / conceptual questions: synthesize theory and DO NOT execute code
     if is_theoretical_intent:
@@ -478,7 +496,7 @@ async def reasoning_node(state: PlanState) -> dict[str, Any]:
                     model="Qwen/Qwen2.5-72B-Instruct",
                     user_prompt=theory_prompt,
                     system_prompt="You are a principal computer science educator and systems architect. Provide comprehensive, deeply insightful theoretical explanations.",
-                    timeout=15.0,
+                    timeout=60.0,
                 )
                 if hf_res and len(hf_res.strip()) > 50:
                     synth = hf_res.strip()
