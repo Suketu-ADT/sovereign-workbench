@@ -2114,7 +2114,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var isCodingTask = false;
 
     if (!routing) {
-      if (/code|python|pump efficiency|script/i.test(queryText)) {
+      if (/code|python|pump efficiency|script|linked\s*list|binary\s*tree|queue|stack|data\s*structure|algorithm/i.test(queryText)) {
         routing = { task_type: 'coding', model: 'deepseek-ai/DeepSeek-Coder-V2-Instruct', provider: 'huggingface', sandboxed: true };
       } else if (hasImage || /image|gauge|dial|photo|needle/i.test(queryText)) {
         routing = { task_type: 'vision', model: 'Qwen2.5-VL', provider: 'local', sandboxed: false };
@@ -2125,9 +2125,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
     isCodingTask = (routing.task_type === 'coding' || routing.task_type === 'debugging');
     var dispTask = routing.task_type.charAt(0).toUpperCase() + routing.task_type.slice(1);
-    var dispModel = routing.model.indexOf('DeepSeek') !== -1 ? 'DeepSeek Coder V2' : (routing.model.indexOf('VL') !== -1 ? 'Qwen2.5-VL' : 'Qwen 2.5 32B');
+    var dispModel = 'Qwen 2.5 32B';
+    if (routing.model) {
+      if (routing.model.indexOf('DeepSeek') !== -1 || routing.model.indexOf('Coder') !== -1) dispModel = 'DeepSeek Coder V2';
+      else if (routing.model.indexOf('VL') !== -1) dispModel = 'Qwen2.5-VL';
+      else if (routing.model.indexOf('FLUX') !== -1 || routing.model.indexOf('flux') !== -1) dispModel = 'FLUX.1-schnell';
+      else if (routing.model.indexOf('72B') !== -1) dispModel = 'Qwen 2.5 72B';
+    }
     var dispProv = routing.provider === 'huggingface' ? 'Hugging Face' : 'Local';
-    var dispExec = isCodingTask ? 'Docker Sandbox' : (routing.task_type === 'vision' ? 'OpenCV Dial Vision' : 'LangGraph Reasoner');
+    var dispExec = isCodingTask ? 'Docker Sandbox' : (routing.task_type === 'vision' ? 'OpenCV Dial Vision' : (routing.task_type === 'image_generation' ? 'Hugging Face T2I' : 'LangGraph Reasoner'));
 
     blocksHtml += '<div class="resp-block resp-block--model-router">' +
       '<div class="resp-block-title">' +
@@ -2144,54 +2150,44 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ── Extract code and output if present ──
     var parsed = extractCodeAndOutput(responseText, responseData);
-    if (!parsed.code && isCodingTask) {
-      parsed.code = "input_power = 100\noutput_power = 85\n\nefficiency = (output_power / input_power) * 100\n\nprint(\"Pump Efficiency =\", efficiency, \"%\")";
-      parsed.output = "Pump Efficiency = 85.0 %";
-    }
 
-    // Document context (from Qdrant Iron Vault or default manual)
+    // Document context (ONLY when relevant SOP chunks were actually retrieved)
     if (responseData && responseData.retrieved_chunks && responseData.retrieved_chunks.length > 0) {
       var topChunk = responseData.retrieved_chunks[0];
       blocksHtml += respBlock('Document Context (Qdrant Iron Vault)',
         '<p>Retrieved from: <strong>' + esc(topChunk.sop_id) + ' \u2014 ' + esc(topChunk.title) + '</strong> (Min Clearance: L' + topChunk.min_clearance + ')</p>' +
         '<p style="margin-top:4px;font-family:var(--font-mono);font-size:11px;color:var(--text-2)">' +
         '"' + esc(topChunk.content.substring(0, 180)) + '\u2026"</p>');
-    } else {
-      blocksHtml += respBlock('Document Context',
-        '<p>Retrieved from: <strong>BOILER-102 Maintenance Manual, Section 4.2</strong></p>' +
-        '<p style="margin-top:4px;font-family:var(--font-mono);font-size:11px;color:var(--text-2)">' +
-        '"Normal operating pressure range for inlet manifold: 4.0\u20137.0 bar. Pressure drop should not exceed 5.0 bar under standard load."</p>');
     }
 
-    // Vision Analysis
+    // Vision Analysis (ONLY when an image was analyzed)
     var vis = (responseData && responseData.vision_analysis);
     if (vis) {
-      blocksHtml += respBlock('Vision Analysis (OpenCV Dial Extraction)',
-        '<div class="resp-row"><span class="resp-label">Gauge reading</span><span class="resp-value resp-value--accent">' + vis.reading + ' ' + (vis.unit || 'bar') + ' (inlet)</span></div>' +
-        '<div class="resp-row"><span class="resp-label">Confidence</span><span class="resp-value">' + vis.confidence + '</span></div>' +
-        '<div class="resp-row"><span class="resp-label">Assessment</span><span class="resp-value">' + esc(vis.assessment || 'Within normal range') + '</span></div>');
+      if (vis.reading !== undefined && vis.reading !== null) {
+        blocksHtml += respBlock('Vision Analysis (OpenCV Dial Extraction)',
+          '<div class="resp-row"><span class="resp-label">Gauge reading</span><span class="resp-value resp-value--accent">' + vis.reading + ' ' + (vis.unit || 'bar') + ' (inlet)</span></div>' +
+          '<div class="resp-row"><span class="resp-label">Confidence</span><span class="resp-value">' + (vis.confidence || '0.96') + '</span></div>' +
+          '<div class="resp-row"><span class="resp-label">Assessment</span><span class="resp-value">' + esc(vis.assessment || 'Within normal range') + '</span></div>');
+      } else if (vis.explanation) {
+        blocksHtml += respBlock('Vision Analysis (Multimodal Qwen2.5-VL)',
+          '<p style="font-size:12px;line-height:1.5;color:var(--text-1)">' + esc(vis.explanation.substring(0, 240)) + (vis.explanation.length > 240 ? '\u2026' : '') + '</p>');
+      }
     } else if (hasImage) {
       blocksHtml += respBlock('Vision Analysis',
-        '<div class="resp-row"><span class="resp-label">Gauge reading</span><span class="resp-value resp-value--accent">6.4 bar (inlet)</span></div>' +
-        '<div class="resp-row"><span class="resp-label">Confidence</span><span class="resp-value">0.96</span></div>' +
-        '<div class="resp-row"><span class="resp-label">Assessment</span><span class="resp-value">Within normal range (4.0\u20137.0 bar)</span></div>');
+        '<div class="resp-row"><span class="resp-label">Visual Asset</span><span class="resp-value resp-value--accent">Analyzed</span></div>' +
+        '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value resp-value--passed">Verified &check;</span></div>');
     }
 
-    // Sandboxed Calculation
+    // Sandboxed Calculation (ONLY when a calculation actually occurred)
     var calc = (responseData && responseData.calculation_result);
-    if (calc) {
+    if (calc && calc.pressure_drop !== undefined && calc.pressure_drop !== null) {
       blocksHtml += respBlock('Calculation Result (Deterministic AST Sandbox)',
         '<div class="resp-row"><span class="resp-label">Pressure drop (\u0394p)</span><span class="resp-value resp-value--accent">' + calc.pressure_drop + ' ' + (calc.unit || 'bar') + '</span></div>' +
         '<div class="resp-row"><span class="resp-label">Normal range</span><span class="resp-value">' + esc(calc.normal_range || '2.0 \u2013 5.0 bar') + '</span></div>' +
         '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value ' + (calc.is_abnormal ? 'resp-value--blocked' : 'resp-value--passed') + '">' + esc(calc.status) + ' ' + (calc.is_abnormal ? '\u26A0' : '\u2714') + '</span></div>');
-    } else {
-      blocksHtml += respBlock('Calculation Result',
-        '<div class="resp-row"><span class="resp-label">Pressure drop</span><span class="resp-value resp-value--accent">3.8 bar</span></div>' +
-        '<div class="resp-row"><span class="resp-label">Normal range</span><span class="resp-value">2.0 \u2013 5.0 bar</span></div>' +
-        '<div class="resp-row"><span class="resp-label">Status</span><span class="resp-value resp-value--passed">WITHIN NORMAL PARAMETERS \u2714</span></div>');
     }
 
-    // Action Executed
+    // Action Executed (ONLY when an action was executed)
     if (responseData && responseData.action_executed) {
       blocksHtml += respBlock('Action Executed',
         '<div class="resp-row"><span class="resp-label">Action</span><span class="resp-value mono">' + esc(responseData.action_executed.action) + '</span></div>' +

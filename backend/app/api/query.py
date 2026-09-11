@@ -573,7 +573,14 @@ async def stream_query(
             "sop", "manual", "pressure", "temperature", "drum", "bms", "feedwater",
             "clearance", "actuator", "flange", "gauge", "telemetry"
         ])
-        if has_image and not is_gauge_query(body.text) and not is_plant_related:
+        is_coding_task = routing.get("task_type") in ("coding", "debugging")
+        if is_coding_task:
+            retrieved_chunks = []
+        elif has_image and not is_gauge_query(body.text) and not is_plant_related:
+            retrieved_chunks = []
+        elif not is_plant_related and any(cs in lower_text for cs in [
+            "linked list", "binary tree", "queue", "stack", "data structure", "algorithm", "python", "code", "syntax"
+        ]):
             retrieved_chunks = []
         else:
             retrieved_chunks = retrieval_service.retrieve(
@@ -585,6 +592,8 @@ async def stream_query(
             unit = "reactor-core-aux"
         elif "turbine" in lower_text:
             unit = "turbine-gen-4"
+        elif is_coding_task:
+            unit = "sandbox-compute"
         elif has_image and not is_gauge_query(body.text):
             unit = "visual-asset"
         else:
@@ -616,8 +625,10 @@ async def stream_query(
             top_title = top_chunk.title
             top_sop = top_chunk.sop_id
             readout_text = f"{len(retrieved_chunks)} docs matched → Top: {top_sop} {top_title}"
+        elif is_coding_task:
+            readout_text = "0 plant manuals required (routed to code intelligence sandbox)"
         else:
-            readout_text = "0 plant manuals required (general visual analysis prompt)"
+            readout_text = "0 plant manuals required (general query prompt)"
 
         yield _sse_event("step_complete", {
             "step": "doc-retrieval",
@@ -829,6 +840,7 @@ async def stream_query(
             pressure_drop=calc_result.pressure_drop if calc_result else None,
             vision_analysis=vision_analysis,
             vision_explanation=vision_analysis.get("explanation") if vision_analysis else None,
+            task_type=routing.get("task_type"),
         )
 
         is_awaiting = bool(plan_result.get("approval_required"))

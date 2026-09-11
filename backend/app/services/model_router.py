@@ -19,6 +19,14 @@ _CODING_PATTERNS = [
     r"\b(code|python|script|function|algorithm|syntax)\b",
     r"\b(debug|fix|troubleshoot|refactor|error in code)\b",
     r"\bcalculate pump efficiency\b",
+    r"\b(linked\s*list|single\s*linked|singly\s*linked|doubly\s*linked|circular\s*linked)\b",
+    r"\b(binary\s*tree|bst|avl\s*tree|red\s*black\s*tree|trie|b\s*tree|segment\s*tree)\b",
+    r"\b(queue|priority\s*queue|deque|stack|heap|hash\s*map|hash\s*table|hashmap|hashtable)\b",
+    r"\b(data\s*structures?|array|arrays|vector|graph\s*algorithm|adjacency\s*list)\b",
+    r"\b(sorting|quicksort|mergesort|heapsort|bubblesort|binary\s*search|dfs|bfs|dijkstra)\b",
+    r"\b(recursion|dynamic\s*programming|memoization|time\s*complexity|space\s*complexity|big\s*o)\b",
+    r"\b(pointer|pointers|node|nodes|struct|structs|class|classes|oop|polymorphism|inheritance)\b",
+    r"\b(write|implement|code|generate|solve|program)\b.*\b(function|method|class|algorithm|problem|exercise|leetcode)\b",
 ]
 
 _DEBUGGING_PATTERNS = [
