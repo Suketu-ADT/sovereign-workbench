@@ -160,13 +160,21 @@ async def submit_query(
         )
 
     # ── Step 4: Document Retrieval & Query Acceptance ────────
-    retrieved_chunks = retrieval_service.retrieve(
-        query=body.text,
-        operator_clearance=clearance,
-    )
+    lower_text = body.text.lower()
+    is_plant_related = any(k in lower_text for k in [
+        "boiler", "turbine", "reactor", "pump", "valve", "pipe", "plant",
+        "sop", "manual", "pressure", "temperature", "drum", "bms", "feedwater",
+        "clearance", "actuator", "flange", "gauge", "telemetry"
+    ])
+    if has_image_requested and not is_gauge_query(body.text) and not is_plant_related:
+        retrieved_chunks = []
+    else:
+        retrieved_chunks = retrieval_service.retrieve(
+            query=body.text,
+            operator_clearance=clearance,
+        )
 
     # Determine equipment unit from query context
-    lower_text = body.text.lower()
     if "reactor" in lower_text:
         unit = "reactor-core-aux"
     elif "turbine" in lower_text:
@@ -559,12 +567,20 @@ async def stream_query(
             "label": "Document Retrieval",
             "desc": "Role-filtered manual lookup",
         })
-        retrieved_chunks = retrieval_service.retrieve(
-            query=body.text,
-            operator_clearance=clearance,
-        )
-
         lower_text = body.text.lower()
+        is_plant_related = any(k in lower_text for k in [
+            "boiler", "turbine", "reactor", "pump", "valve", "pipe", "plant",
+            "sop", "manual", "pressure", "temperature", "drum", "bms", "feedwater",
+            "clearance", "actuator", "flange", "gauge", "telemetry"
+        ])
+        if has_image and not is_gauge_query(body.text) and not is_plant_related:
+            retrieved_chunks = []
+        else:
+            retrieved_chunks = retrieval_service.retrieve(
+                query=body.text,
+                operator_clearance=clearance,
+            )
+
         if "reactor" in lower_text:
             unit = "reactor-core-aux"
         elif "turbine" in lower_text:
@@ -595,13 +611,18 @@ async def stream_query(
                 await db.commit()
 
         elapsed = int((time.time() - t_step) * 1000)
-        top_chunk = retrieved_chunks[0] if retrieved_chunks else None
-        top_title = top_chunk.title if top_chunk else "Standard Operating Procedures"
-        top_sop = top_chunk.sop_id if top_chunk else "SOP"
+        if retrieved_chunks:
+            top_chunk = retrieved_chunks[0]
+            top_title = top_chunk.title
+            top_sop = top_chunk.sop_id
+            readout_text = f"{len(retrieved_chunks)} docs matched → Top: {top_sop} {top_title}"
+        else:
+            readout_text = "0 plant manuals required (general visual analysis prompt)"
+
         yield _sse_event("step_complete", {
             "step": "doc-retrieval",
             "status": "passed",
-            "readout": f"{len(retrieved_chunks)} docs matched → Top: {top_sop} {top_title}",
+            "readout": readout_text,
             "chunks": [c.model_dump() for c in retrieved_chunks],
             "elapsed_ms": elapsed,
         })

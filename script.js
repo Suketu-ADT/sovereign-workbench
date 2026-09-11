@@ -150,19 +150,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var state = {
     theme: localStorage.getItem('sovereign_theme') || 'light',
-    currentView: 'chat',
+    currentView: 'home',
     sidebarOpen: true,
     pipelineRunning: false,
     imageAttached: false,
     imageName: '',
     imageData: null,
-    token: localStorage.getItem('sovereign_token') || null,
+    token: null,
     auditLog: [],
     lastHash: '0'.repeat(64),
     chats: [],           // { id, title, group, messages:[] }
     activeChatId: null,
     chatCounter: 0,
-    user: DEMO_USERS.suketu
+    user: null           // Unauthenticated on landing page by default
   };
 
 
@@ -177,12 +177,19 @@ document.addEventListener('DOMContentLoaded', function () {
     btnNewChat:     $('btn-new-chat'),
     chatList:       $('chat-list'),
     themeToggle:    $('theme-toggle'),
+    tabHome:        $('tab-home'),
     tabChat:        $('tab-chat'),
     tabPipeline:    $('tab-pipeline'),
     tabAudit:       $('tab-audit'),
+    homeView:       $('home-view'),
     chatView:       $('chat-view'),
     pipelineView:   $('pipeline-view'),
     auditView:      $('audit-view'),
+    btnNavLogin:    $('btn-nav-login'),
+    btnHeroLaunch:   $('btn-hero-launch'),
+    btnHeroLogin:    $('btn-hero-login'),
+    btnHeroPipeline: $('btn-hero-pipeline'),
+    btnHomeAuditCard:$('btn-home-audit-card'),
     chatScroll:     $('chat-scroll'),
     chatMessages:   $('chat-messages'),
     btnScrollBottom:$('btn-scroll-bottom'),
@@ -320,6 +327,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function isMobile() { return window.innerWidth <= 768; }
 
+  var toastTimer = null;
+  function showToast(msg) {
+    var toast = document.getElementById('sovereign-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'sovereign-toast';
+      toast.className = 'sovereign-toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() {
+      toast.classList.remove('show');
+    }, 3200);
+  }
+
 
   // ── THEME ──────────────────────────────────────────────────
 
@@ -346,11 +370,19 @@ document.addEventListener('DOMContentLoaded', function () {
     if (state.user) {
       if (els.btnUserProfile) els.btnUserProfile.hidden = false;
       if (els.btnSidebarLogin) els.btnSidebarLogin.hidden = true;
+      if (els.btnNavLogin) els.btnNavLogin.hidden = true;
       if (els.userPillAvatar) els.userPillAvatar.textContent = state.user.avatar || 'OP';
       if (els.userPillName) els.userPillName.textContent = state.user.name;
       if (els.userPillTier) els.userPillTier.textContent = state.user.tier;
       if (els.menuUserEmail) els.menuUserEmail.textContent = state.user.email;
       if (els.menuUserClearance) els.menuUserClearance.textContent = 'Clearance: ' + state.user.clearanceName;
+
+      // Enable chat input for authenticated operator
+      if (els.chatInput) {
+        els.chatInput.disabled = false;
+        els.chatInput.placeholder = "Ask Sovereign Workbench about equipment, logs, telemetry...";
+      }
+      updateSendState();
 
       // Update clearances modal
       if (els.clrAvatar) els.clrAvatar.textContent = state.user.avatar || 'OP';
@@ -375,6 +407,12 @@ document.addEventListener('DOMContentLoaded', function () {
     } else {
       if (els.btnUserProfile) els.btnUserProfile.hidden = true;
       if (els.btnSidebarLogin) els.btnSidebarLogin.hidden = false;
+      if (els.btnNavLogin) els.btnNavLogin.hidden = false;
+      if (els.chatInput) {
+        els.chatInput.disabled = true;
+        els.chatInput.placeholder = "Please sign in to access Sovereign Workbench console...";
+      }
+      if (els.btnSend) els.btnSend.disabled = true;
       closeUserMenu();
     }
   }
@@ -452,12 +490,15 @@ document.addEventListener('DOMContentLoaded', function () {
   function loginUser(userProfile, skipBriefing) {
     state.user = userProfile;
     updateUserUI();
+    renderChatList();
+    renderChatMessages();
     closeModal(els.authDialog);
     closeUserMenu();
 
     if (!skipBriefing) {
       showShiftBriefing(userProfile);
     }
+    switchView('chat');
   }
 
   function initApiKeyDrawer() {
@@ -543,9 +584,12 @@ document.addEventListener('DOMContentLoaded', function () {
     state.token = null;
     localStorage.removeItem('sovereign_token');
     updateUserUI();
+    renderChatList();
+    renderChatMessages();
     closeUserMenu();
     addAuditEntry('OPERATOR_LOGOUT', 'Operator ' + prevEmail + ' logged out of console');
-    openModal(els.authDialog);
+    switchView('home');
+    showToast('Operator logged out.');
   }
 
   function authenticate(email, password, isInitialLoad) {
@@ -710,6 +754,24 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function renderChatList() {
+    if (!state.user) {
+      els.chatList.innerHTML =
+        '<div class="sidebar-locked-notice">' +
+          '<div class="locked-icon-shield">' +
+            '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
+          '</div>' +
+          '<div class="locked-text">' +
+            '<span class="locked-title">Access Restricted</span>' +
+            '<span class="locked-sub">Operator clearance required to view and manage operational chats</span>' +
+          '</div>' +
+          '<button type="button" class="btn-sidebar-unlock" id="btn-sidebar-unlock">' +
+            '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="5" r="3"/><path d="M2.5 14a5.5 5.5 0 0 1 11 0"/></svg>' +
+            '<span>Sign In</span>' +
+          '</button>' +
+        '</div>';
+      return;
+    }
+
     var html = '';
     var groups = {};
 
@@ -740,13 +802,18 @@ document.addEventListener('DOMContentLoaded', function () {
   // ── VIEW SWITCHING ─────────────────────────────────────────
 
   function switchView(view) {
+    if (view === 'chat' && !state.user) {
+      showToast('Operator clearance required to access chat console.');
+      openModal(els.authDialog);
+      return;
+    }
     state.currentView = view;
-    var views = { chat: els.chatView, pipeline: els.pipelineView, audit: els.auditView };
-    var tabs  = { chat: els.tabChat, pipeline: els.tabPipeline, audit: els.tabAudit };
+    var views = { home: els.homeView, chat: els.chatView, pipeline: els.pipelineView, audit: els.auditView };
+    var tabs  = { home: els.tabHome, chat: els.tabChat, pipeline: els.tabPipeline, audit: els.tabAudit };
 
     Object.keys(views).forEach(function(k) {
-      views[k].classList.toggle('view--active', k === view);
-      tabs[k].classList.toggle('active', k === view);
+      if (views[k]) views[k].classList.toggle('view--active', k === view);
+      if (tabs[k]) tabs[k].classList.toggle('active', k === view);
     });
 
     if (view === 'audit') renderAuditLog();
@@ -755,7 +822,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── CHAT MANAGEMENT ────────────────────────────────────────
 
-  function createChat() {
+  function createChat(opts) {
+    opts = opts || {};
     state.chatCounter++;
     var chat = {
       id: 'chat-' + Date.now() + '-' + state.chatCounter,
@@ -772,8 +840,10 @@ document.addEventListener('DOMContentLoaded', function () {
     updateSendState();
     renderChatList();
     renderChatMessages();
-    switchView('chat');
-    els.chatInput.focus();
+    if (!opts.silent) {
+      switchView('chat');
+      els.chatInput.focus();
+    }
     if (isMobile()) closeSidebar();
     return chat;
   }
@@ -817,6 +887,29 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function renderChatMessages() {
+    if (!state.user) {
+      els.chatMessages.innerHTML =
+        '<div class="chat-locked-barrier">' +
+          '<div class="locked-barrier-badge">' +
+            '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6">' +
+              '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>' +
+            '</svg>' +
+          '</div>' +
+          '<h2 class="locked-barrier-title">SCADA Console Locked</h2>' +
+          '<p class="locked-barrier-sub">Operational telemetry extraction, sandboxed calculations, and agentic actuator reasoning require verified operator clearance. Please sign in to establish a secure session.</p>' +
+          '<div class="locked-barrier-actions">' +
+            '<button type="button" class="btn-cerebrium btn-cerebrium--primary" id="btn-barrier-signin">' +
+              '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5" r="3"/><path d="M2.5 14a5.5 5.5 0 0 1 11 0"/></svg>' +
+              '<span>Sign In as Operator</span>' +
+            '</button>' +
+            '<button type="button" class="btn-cerebrium btn-cerebrium--ghost" id="btn-barrier-home">' +
+              '<span>Return to Landing Page</span>' +
+            '</button>' +
+          '</div>' +
+        '</div>';
+      return;
+    }
+
     var chat = getActiveChat();
     if (!chat || chat.messages.length === 0) {
       // Show refined Cerebrium-style welcome screen
@@ -2243,8 +2336,13 @@ document.addEventListener('DOMContentLoaded', function () {
   // ── DEMO SCENARIOS ─────────────────────────────────────────
 
   function loadDemoScenario(promptText, attachImage) {
+    if (!state.user) {
+      showToast('Please sign in to execute operational scenarios.');
+      openModal(els.authDialog);
+      return;
+    }
     if (state.pipelineRunning) return;
-    if (!getActiveChat() || getActiveChat().messages.length > 0) createChat();
+    if (!getActiveChat() || getActiveChat().messages.length > 0) createChat({ silent: true });
     els.chatInput.value = promptText;
     if (attachImage) {
       simulateImageAttach();
@@ -2253,6 +2351,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     autoResize();
     updateSendState();
+    switchView('chat');
     els.chatInput.focus();
   }
 
@@ -2267,18 +2366,127 @@ document.addEventListener('DOMContentLoaded', function () {
   els.btnOpenSidebar.addEventListener('click', toggleSidebar);
   els.btnCloseSidebar.addEventListener('click', closeSidebar);
   els.sidebarOverlay.addEventListener('click', closeSidebar);
-  els.btnNewChat.addEventListener('click', createChat);
+  els.btnNewChat.addEventListener('click', function() {
+    if (!state.user) {
+      showToast('Please sign in to create an operational chat session.');
+      openModal(els.authDialog);
+      return;
+    }
+    createChat();
+  });
 
   els.chatList.addEventListener('click', function(e) {
+    var btnUnlock = e.target.closest('#btn-sidebar-unlock');
+    if (btnUnlock) {
+      openModal(els.authDialog);
+      return;
+    }
+    if (!state.user) {
+      openModal(els.authDialog);
+      return;
+    }
     var btn = e.target.closest('.chat-item');
     if (btn && btn.dataset.chatId) switchChat(btn.dataset.chatId);
   });
 
-  els.tabChat.addEventListener('click', function() { switchView('chat'); });
+  if (els.tabHome) {
+    els.tabHome.addEventListener('click', function() { switchView('home'); });
+  }
+  els.tabChat.addEventListener('click', function() {
+    if (!state.user) {
+      showToast('Operator clearance required to access chat console.');
+      openModal(els.authDialog);
+      return;
+    }
+    switchView('chat');
+  });
   els.tabPipeline.addEventListener('click', function() { switchView('pipeline'); });
   els.tabAudit.addEventListener('click', function() {
     loadAuditLog();
     switchView('audit');
+  });
+
+  // Nav Login Button
+  if (els.btnNavLogin) {
+    els.btnNavLogin.addEventListener('click', function() {
+      openModal(els.authDialog);
+    });
+  }
+
+  // Home Hero Buttons
+  if (els.btnHeroLaunch) {
+    els.btnHeroLaunch.addEventListener('click', function() {
+      if (!state.user) {
+        showToast('Operator clearance required to access chat console.');
+        openModal(els.authDialog);
+        return;
+      }
+      switchView('chat');
+      els.chatInput.focus();
+    });
+  }
+  if (els.btnHeroLogin) {
+    els.btnHeroLogin.addEventListener('click', function() {
+      openModal(els.authDialog);
+    });
+  }
+  if (els.btnHeroPipeline) {
+    els.btnHeroPipeline.addEventListener('click', function() {
+      switchView('pipeline');
+    });
+  }
+  if (els.btnHomeAuditCard) {
+    els.btnHomeAuditCard.addEventListener('click', function() {
+      loadAuditLog();
+      switchView('audit');
+    });
+  }
+
+  // Home Page Scenario Card click delegate
+  if (els.homeView) {
+    els.homeView.addEventListener('click', function(e) {
+      var card = e.target.closest('.demo-card');
+      if (card && card.dataset.prompt) {
+        var attachImg = card.dataset.image === 'true';
+        loadDemoScenario(card.dataset.prompt, attachImg);
+      }
+    });
+  }
+
+  // Handle clicks in chatMessages (suggestion cards, barrier buttons, thinking block toggle)
+  els.chatMessages.addEventListener('click', function(e) {
+    var btnBarrierSignin = e.target.closest('#btn-barrier-signin');
+    if (btnBarrierSignin) {
+      openModal(els.authDialog);
+      return;
+    }
+    var btnBarrierHome = e.target.closest('#btn-barrier-home');
+    if (btnBarrierHome) {
+      switchView('home');
+      return;
+    }
+    var card = e.target.closest('.suggestion-card');
+    if (card) {
+      var prompt = card.getAttribute('data-prompt');
+      var attachImg = card.getAttribute('data-image') === 'true';
+      if (prompt) {
+        loadDemoScenario(prompt, attachImg);
+      }
+      return;
+    }
+
+    var toggle = e.target.closest('.thinking-toggle');
+    if (toggle) {
+      var block = toggle.closest('.thinking-block');
+      if (block) {
+        block.classList.toggle('collapsed');
+        var idx = block.getAttribute('data-msg-idx');
+        var chat = getActiveChat();
+        if (chat && idx !== '' && chat.messages[idx] && chat.messages[idx].thinking) {
+          chat.messages[idx].thinking.collapsed = block.classList.contains('collapsed');
+        }
+      }
+    }
   });
 
   els.chatInput.addEventListener('input', function() { updateSendState(); autoResize(); });
@@ -2319,32 +2527,6 @@ document.addEventListener('DOMContentLoaded', function () {
       }
       e.preventDefault();
       handleSubmit();
-    }
-  });
-
-  // Handle clicks in chatMessages (suggestion cards, thinking block toggle)
-  els.chatMessages.addEventListener('click', function(e) {
-    var card = e.target.closest('.suggestion-card');
-    if (card) {
-      var prompt = card.getAttribute('data-prompt');
-      var attachImg = card.getAttribute('data-image') === 'true';
-      if (prompt) {
-        loadDemoScenario(prompt, attachImg);
-      }
-      return;
-    }
-
-    var toggle = e.target.closest('.thinking-toggle');
-    if (toggle) {
-      var block = toggle.closest('.thinking-block');
-      if (block) {
-        block.classList.toggle('collapsed');
-        var idx = block.getAttribute('data-msg-idx');
-        var chat = getActiveChat();
-        if (chat && idx !== '' && chat.messages[idx] && chat.messages[idx].thinking) {
-          chat.messages[idx].thinking.collapsed = block.classList.contains('collapsed');
-        }
-      }
     }
   });
 
@@ -2447,16 +2629,33 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  // Quick Demo Profiles
-  var qpButtons = document.querySelectorAll('.quick-profile-btn');
+  // Quick Demo Profiles (Auth modal & login page)
+  var qpButtons = document.querySelectorAll('.quick-profile-btn, .fast-tier-btn');
   qpButtons.forEach(function(btn) {
     btn.addEventListener('click', function() {
-      var userKey = btn.getAttribute('data-demo-user');
+      var userKey = btn.getAttribute('data-demo-user') || btn.getAttribute('data-user');
       if (DEMO_USERS[userKey]) {
         authenticate(DEMO_USERS[userKey].email, 'changeme123');
       }
     });
   });
+
+  var formLoginPage = $('form-login-page');
+  if (formLoginPage) {
+    formLoginPage.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var email = ($('lp-email') && $('lp-email').value.trim()) || 'suketu.2005@gmail.com';
+      var password = ($('lp-password') && $('lp-password').value) || 'changeme123';
+      authenticate(email, password);
+    });
+  }
+
+  var linkGuestAccess = $('link-guest-access');
+  if (linkGuestAccess) {
+    linkGuestAccess.addEventListener('click', function() {
+      switchView('home');
+    });
+  }
 
   // Custom Sign In Submit
   if (els.formSignin) {
@@ -2546,14 +2745,20 @@ document.addEventListener('DOMContentLoaded', function () {
   initApiKeyDrawer();
   checkModelStatus();
 
-  // Try to authenticate default operator against backend to acquire real JWT
-  authenticate('suketu.2005@gmail.com', 'changeme123', true);
+  // Initial landing page state: unauthenticated guest
+  state.user = null;
+  state.token = null;
 
   // Seed past chats
   SEED_CHATS.forEach(function(c) { state.chats.push(c); });
 
-  // Create initial active chat
-  var firstChat = createChat();
+  // Update UI components for unauthenticated state
+  updateUserUI();
+  renderChatList();
+  renderChatMessages();
+
+  // Switch to Home landing view
+  switchView('home');
 
   // Load verified audit chain from backend
   loadAuditLog();

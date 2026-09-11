@@ -39,6 +39,11 @@ _DOCUMENT_PATTERNS = [
     r"\b(read|review|extract from)\b.*\b(manual|sop|spec|guideline)\b",
 ]
 
+_IMAGE_GEN_PATTERNS = [
+    r"\b(generate|create|render|draw|synthesize)\b.*\b(image|picture|diagram|schematic|p&id|flowchart|visual|blueprint)\b",
+    r"\b(image generation|schematic synthesis|text to image|t2i|flux)\b",
+]
+
 _PLANNING_PATTERNS = [
     r"\b(plan|workflow|orchestrate|mitigate|protocol|scram|emergency shutdown|isolate)\b",
 ]
@@ -47,12 +52,17 @@ _PLANNING_PATTERNS = [
 def classify_task(prompt: str, has_image: bool = False) -> str:
     """
     Automatically classifies an input query into one of the supported task types:
-    coding, debugging, vision, calculation, document, summarization, planning, reasoning.
+    coding, debugging, vision, image_generation, calculation, document, summarization, planning, reasoning.
     """
     if has_image:
         return "vision"
 
     prompt_clean = prompt.lower().strip()
+
+    # Check for image generation / schematic synthesis keywords
+    if any(re.search(p, prompt_clean) for p in _IMAGE_GEN_PATTERNS):
+        if not any(re.search(p, prompt_clean) for p in _CODING_PATTERNS):
+            return "image_generation"
 
     # Check for vision keywords
     if any(re.search(p, prompt_clean) for p in _VISION_PATTERNS):
@@ -118,6 +128,8 @@ def select_model(task_type: str) -> Dict[str, Any]:
             model = "deepseek-coder-v2:local"
         elif normalized_task in ("reasoning", "planning", "document", "summarization"):
             model = getattr(settings, "PLANNER_MODEL_NAME", "qwen2.5-32b:local")
+        elif normalized_task == "image_generation":
+            model = "flux1-schnell:local"
 
     routing_decision = {
         "task_type": normalized_task,

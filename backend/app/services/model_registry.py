@@ -69,6 +69,13 @@ DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
         "description": "Isolated deterministic AST sandbox computation (e.g. pressure drop)",
         "sandboxed": True,
     },
+    "image_generation": {
+        "provider": "huggingface",
+        "model": "black-forest-labs/FLUX.1-schnell",
+        "capabilities": ["image_generation", "diagram_generation", "schematic", "synthetic_telemetry", "flux", "generate_image"],
+        "description": "FLUX.1-schnell 12B rectified flow 4-step image generator via Hugging Face API (Apache 2.0)",
+        "sandboxed": False,
+    },
 }
 
 

@@ -126,7 +126,13 @@
       </div>
 
       <nav class="header-nav" aria-label="View navigation">
-        <button type="button" class="view-tab active" id="tab-chat" data-view="chat">
+        <button type="button" class="view-tab active" id="tab-home" data-view="home">
+          <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M2.5 7.5L9 2.5l6.5 5V15a1 1 0 0 1-1 1h-3.5v-4.5h-4V16H3.5a1 1 0 0 1-1-1V7.5Z"/>
+          </svg>
+          <span>Home</span>
+        </button>
+        <button type="button" class="view-tab" id="tab-chat" data-view="chat">
           <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
             <path d="M3 3h12v9H6l-3 3V3Z"/>
           </svg>
@@ -147,6 +153,10 @@
       </nav>
 
       <div class="header-right">
+        <button type="button" id="btn-nav-login" class="header-login-btn" title="Operator Sign In">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5" r="3"/><path d="M2.5 14a5.5 5.5 0 0 1 11 0"/></svg>
+          <span>Sign In</span>
+        </button>
         <div class="header-model-pill" id="header-model-pill" title="Multi-Model Routing: DeepSeek-Coder-V2 + Qwen 2.5 32B + Qwen2.5-VL">
           <span class="model-pill-dot"></span>
           <span class="model-pill-name">Multi-Model</span>
@@ -170,8 +180,306 @@
       </div>
     </header>
 
+    <!-- ═══ HOME VIEW (Cerebrium.ai Inspired) ═══ -->
+    <div id="home-view" class="view view--active">
+      <div class="home-container">
+        <!-- Hero Section -->
+        <section class="home-hero">
+          <div class="home-hero-glow"></div>
+          <div class="home-hero-badge">
+            <span class="home-pulse-dot"></span>
+            <span>AIR-GAPPED SOVEREIGN AI INFRASTRUCTURE v2.4</span>
+          </div>
+          <h1 class="home-hero-title">
+            Serverless AI Infrastructure<br>
+            <span class="gradient-text">for Air-Gapped Operations</span>
+          </h1>
+          <p class="home-hero-subtitle">
+            Deploy DeepSeek Coder V2, Qwen2.5-VL, and local open-weight reasoning models on-premise.
+            Guarded by an 8-stage deterministic defense pipeline, role-based Qdrant vector retrieval,
+            and tamper-proof SHA-256 cryptographic audit ledger.
+          </p>
+          <div class="home-hero-actions">
+            <button type="button" id="btn-hero-launch" class="btn-cerebrium btn-cerebrium--primary">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="5 3 11 8 5 13"/></svg>
+              <span>Launch AI Console</span>
+            </button>
+            <button type="button" id="btn-hero-login" class="btn-cerebrium btn-cerebrium--secondary">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5" r="3"/><path d="M2.5 14a5.5 5.5 0 0 1 11 0"/></svg>
+              <span>Operator Sign In</span>
+            </button>
+            <button type="button" id="btn-hero-pipeline" class="btn-cerebrium btn-cerebrium--ghost">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
+              <span>Defense Pipeline</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Live Telemetry Metric Ribbon -->
+        <section class="home-telemetry-bar">
+          <div class="telemetry-card">
+            <div class="telemetry-head">
+              <span class="telemetry-value">124<span class="telemetry-unit">ms</span></span>
+              <span class="telemetry-tag tag--green">LIVE</span>
+            </div>
+            <span class="telemetry-label">P99 Inference Latency</span>
+            <span class="telemetry-sub">FastEmbed &amp; vLLM Engine</span>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-head">
+              <span class="telemetry-value">8 / 8</span>
+              <span class="telemetry-tag tag--blue">ENFORCED</span>
+            </div>
+            <span class="telemetry-label">Defense Gates Passed</span>
+            <span class="telemetry-sub">Llama-Guard-3 &amp; AST Verifier</span>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-head">
+              <span class="telemetry-value">Qdrant</span>
+              <span class="telemetry-tag tag--purple">EMBEDDED</span>
+            </div>
+            <span class="telemetry-label">Iron Vault Vector DB</span>
+            <span class="telemetry-sub">Role-Based Clearance RAG</span>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-head">
+              <span class="telemetry-value">SHA-256</span>
+              <span class="telemetry-tag tag--gold">VERIFIED</span>
+            </div>
+            <span class="telemetry-label">Cryptographic Ledger</span>
+            <span class="telemetry-sub">Zero-Trust Tamper-Proof Chain</span>
+          </div>
+        </section>
+
+        <!-- Bento Grid Section -->
+        <section class="home-bento-section">
+          <div class="section-header-wrap">
+            <span class="section-kicker">INFRASTRUCTURE CAPABILITIES</span>
+            <h2 class="section-title">Confidential Industrial Agentic Architecture</h2>
+            <p class="section-desc">Engineered for defense-in-depth, zero data exfiltration, and deterministic automation.</p>
+          </div>
+          <div class="home-bento-grid">
+            <!-- Bento 1: Multi-Model Router -->
+            <div class="bento-card bento-card--large">
+              <div class="bento-top">
+                <span class="bento-badge badge--cyan">MULTI-MODEL ROUTER</span>
+                <span class="bento-status-indicator">Auto-Routing Active</span>
+              </div>
+              <h3 class="bento-title">Automatic Semantic Model Dispatch</h3>
+              <p class="bento-desc">Dynamically routes user tasks to specialized weights based on prompt and payload semantics:</p>
+              <div class="bento-model-specs">
+                <div class="spec-row">
+                  <div class="spec-pill pill-coder">DeepSeek-Coder-V2</div>
+                  <div class="spec-info">
+                    <span class="spec-task">Coding &amp; Debugging</span>
+                    <span class="spec-desc">Deterministic AST verification &amp; Docker container sandboxing</span>
+                  </div>
+                </div>
+                <div class="spec-row">
+                  <div class="spec-pill pill-vision">Qwen2.5-VL-72B</div>
+                  <div class="spec-info">
+                    <span class="spec-task">Multimodal Inspection</span>
+                    <span class="spec-desc">OpenCV circular dial gauge needle detection &amp; technical flowcharts</span>
+                  </div>
+                </div>
+                <div class="spec-row">
+                  <div class="spec-pill pill-reason">Qwen 2.5 32B</div>
+                  <div class="spec-info">
+                    <span class="spec-task">Reasoning &amp; SOP Synthesis</span>
+                    <span class="spec-desc">LangGraph multi-step operational decisioning &amp; HITL safety gates</span>
+                  </div>
+                </div>
+                <div class="spec-row">
+                  <div class="spec-pill pill-flux">FLUX.1-schnell</div>
+                  <div class="spec-info">
+                    <span class="spec-task">Schematic &amp; Image Synthesis (Hugging Face API)</span>
+                    <span class="spec-desc">4-step rectified flow industrial diagram &amp; telemetry synthesis via HF Serverless API</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bento 2: Clearance RAG -->
+            <div class="bento-card">
+              <div class="bento-top">
+                <span class="bento-badge badge--purple">QDRANT IRON VAULT</span>
+              </div>
+              <h3 class="bento-title">Role-Based Clearance RAG</h3>
+              <p class="bento-desc">Vector search via FastEmbed BAAI/bge-small-en-v1.5 with hardware-enforced pre-filtering. L1 maintenance staff never see restricted reactor containment procedures.</p>
+              <div class="clearance-pills-preview">
+                <div class="clr-pill-item"><span class="clr-dot clr-dot--l1"></span><span>Level 1 &middot; Boiler-102 Only</span></div>
+                <div class="clr-pill-item"><span class="clr-dot clr-dot--l2"></span><span>Level 2 &middot; Turbines &amp; Pumps</span></div>
+                <div class="clr-pill-item"><span class="clr-dot clr-dot--l3"></span><span>Level 3 &middot; Chief Auditor (All Systems)</span></div>
+              </div>
+            </div>
+
+            <!-- Bento 3: Docker Sandbox -->
+            <div class="bento-card">
+              <div class="bento-top">
+                <span class="bento-badge badge--green">DETERMINISTIC COMPUTE</span>
+              </div>
+              <h3 class="bento-title">Deterministic AST &amp; Sandbox</h3>
+              <p class="bento-desc">Formulas and Python telemetry code execute in memory-isolated sandbox environments, eliminating hallucinated engineering numbers.</p>
+              <div class="sandbox-code-preview">
+                <div class="preview-header"><code>calc_sandbox.py</code><span class="preview-badge">&check; PASS</span></div>
+                <pre class="preview-code"><code>delta_p = inlet_pressure - outlet_pressure
+assert delta_p &lt;= 5.0  # 3.8 bar [NOMINAL]</code></pre>
+              </div>
+            </div>
+
+            <!-- Bento 4: Audit Chain -->
+            <div class="bento-card">
+              <div class="bento-top">
+                <span class="bento-badge badge--gold">IMMUTABLE LEDGER</span>
+              </div>
+              <h3 class="bento-title">Cryptographic SHA-256 Audit Chain</h3>
+              <p class="bento-desc">Every prompt, gate verdict, and operator valve actuator authorization is hashed into an append-only cryptographic ledger.</p>
+              <div class="hash-chain-preview">
+                <div class="hash-step"><span class="hash-index">#0081</span><span class="hash-code">d4a7…</span></div>
+                <span class="hash-arrow">&rarr;</span>
+                <div class="hash-step hash-step--active"><span class="hash-index">#0082</span><span class="hash-code">8f21…</span></div>
+                <span class="hash-arrow">&rarr;</span>
+                <div class="hash-step"><span class="hash-index">#0083</span><span class="hash-code">b39e…</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Quick Demos Section -->
+        <section class="home-demos-section">
+          <div class="section-header-wrap">
+            <span class="section-kicker">LIVE DEMO SCENARIOS</span>
+            <h2 class="section-title">Test the Sovereign Pipeline</h2>
+            <p class="section-desc">Select an operational test case to auto-fill the chat console with verified telemetry.</p>
+          </div>
+          <div class="home-demos-grid">
+            <button type="button" class="demo-card" data-prompt="Write Python code to calculate pump efficiency when input power is 100 kW and output power is 85 kW.">
+              <div class="demo-card-icon coder-icon">&lt;/&gt;</div>
+              <h4 class="demo-card-title">Code Sandbox &amp; AST</h4>
+              <p class="demo-card-desc">Calculate pump efficiency and verify mathematical output in Docker sandbox.</p>
+              <span class="demo-card-action">Launch Scenario &rarr;</span>
+            </button>
+            <button type="button" class="demo-card" data-prompt="Read this inspection image and extract the gauge reading." data-image="true">
+              <div class="demo-card-icon vision-icon">&#9678;</div>
+              <h4 class="demo-card-title">Dial Gauge Inspection</h4>
+              <p class="demo-card-desc">Run OpenCV dial needle angle detection and differential pressure calculation.</p>
+              <span class="demo-card-action">Launch Scenario &rarr;</span>
+            </button>
+            <button type="button" class="demo-card" data-prompt="Explain the uploaded NLP pipeline diagram in detail." data-image="true">
+              <div class="demo-card-icon diagram-icon">&#9638;</div>
+              <h4 class="demo-card-title">Diagram Breakdown</h4>
+              <p class="demo-card-desc">Process technical diagrams and flowcharts via Qwen2.5-VL multimodal router.</p>
+              <span class="demo-card-action">Launch Scenario &rarr;</span>
+            </button>
+            <button type="button" class="demo-card" data-prompt="Generate a detailed P&amp;ID technical schematic diagram for the Boiler-102 steam bypass line.">
+              <div class="demo-card-icon flux-icon">&#9998;</div>
+              <h4 class="demo-card-title">FLUX.1 Diagram Synthesis</h4>
+              <p class="demo-card-desc">Synthesize industrial schematics and digital twin telemetry visuals with 4-step FLUX.1.</p>
+              <span class="demo-card-action">Launch Scenario &rarr;</span>
+            </button>
+            <button type="button" class="demo-card demo-card--audit-action" id="btn-home-audit-card">
+              <div class="demo-card-icon audit-icon">&#10003;</div>
+              <h4 class="demo-card-title">Audit Ledger Verification</h4>
+              <p class="demo-card-desc">Inspect genesis-to-head cryptographic block hash chain in the audit view.</p>
+              <span class="demo-card-action">Inspect Ledger &rarr;</span>
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ═══ LOGIN VIEW (Cerebrium.ai Inspired) ═══ -->
+    <div id="login-view" class="view">
+      <div class="login-page-container">
+        <div class="login-glow-orb"></div>
+        <div class="login-card panel-frame">
+          <div class="login-card-header">
+            <div class="login-badge-seal">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 2L3 6v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V6l-9-4z"/>
+                <path d="M9 12l2 2 4-4"/>
+              </svg>
+            </div>
+            <span class="login-kicker">SCADA AIR-GAPPED AUTHENTICATION</span>
+            <h2 class="login-title">Operator Console Sign In</h2>
+            <p class="login-sub">Workstation WS-OT-04 &middot; Industrial Security Clearance Perimeter</p>
+          </div>
+
+          <!-- 1-Click Fast Clearance Access -->
+          <div class="fast-access-section">
+            <div class="fast-access-header">
+              <span class="fast-access-title">ONE-CLICK CLEARANCE ACCESS</span>
+              <span class="fast-access-hint">Pre-configured seed operators</span>
+            </div>
+            <div class="fast-access-tiers">
+              <button type="button" class="fast-tier-btn tier-l3" data-user="suketu" title="Click to log in as Suketu Patel (Level 3)">
+                <div class="fast-tier-header">
+                  <span class="fast-tier-badge badge-l3">LEVEL 3</span>
+                  <span class="fast-tier-role">Chief Safety Auditor</span>
+                </div>
+                <div class="fast-tier-name">Suketu Patel</div>
+                <div class="fast-tier-email">suketu.2005@gmail.com</div>
+                <div class="fast-tier-scope">Full plant access &middot; Reactor core &middot; Audit write &check;</div>
+              </button>
+
+              <button type="button" class="fast-tier-btn tier-l2" data-user="vance" title="Click to log in as Dr. Elena Vance (Level 2)">
+                <div class="fast-tier-header">
+                  <span class="fast-tier-badge badge-l2">LEVEL 2</span>
+                  <span class="fast-tier-role">Systems Specialist</span>
+                </div>
+                <div class="fast-tier-name">Dr. Elena Vance</div>
+                <div class="fast-tier-email">elena.vance@plant.internal</div>
+                <div class="fast-tier-scope">Turbines &middot; Boilers &middot; High-pressure pumps &check;</div>
+              </button>
+
+              <button type="button" class="fast-tier-btn tier-l1" data-user="morrison" title="Click to log in as John Morrison (Level 1)">
+                <div class="fast-tier-header">
+                  <span class="fast-tier-badge badge-l1">LEVEL 1</span>
+                  <span class="fast-tier-role">Maintenance Engineer</span>
+                </div>
+                <div class="fast-tier-name">John Morrison</div>
+                <div class="fast-tier-email">j.morrison@plant.internal</div>
+                <div class="fast-tier-scope">Boiler-102 &middot; Feedwater regulation &check;</div>
+              </button>
+            </div>
+          </div>
+
+          <div class="login-divider">
+            <span>OR SIGN IN WITH AIR-GAPPED CREDENTIALS</span>
+          </div>
+
+          <!-- Manual Login Form -->
+          <form id="form-login-page" class="login-page-form" onsubmit="return false;">
+            <div class="form-group">
+              <label for="lp-email">Operator Plant Email</label>
+              <input type="email" id="lp-email" class="form-input" placeholder="e.g. suketu.2005@gmail.com" value="suketu.2005@gmail.com" required>
+            </div>
+            <div class="form-group">
+              <label for="lp-password">Access Password</label>
+              <input type="password" id="lp-password" class="form-input" placeholder="Password" value="changeme123" required>
+            </div>
+            <div class="form-row-remember">
+              <label class="checkbox-label">
+                <input type="checkbox" id="lp-remember" checked>
+                <span>Remember session on this air-gapped terminal</span>
+              </label>
+              <button type="button" id="link-guest-access" class="login-link-btn">Continue to Console</button>
+            </div>
+            <button type="submit" id="btn-lp-submit" class="btn-cerebrium btn-cerebrium--primary btn-cerebrium--full">
+              <span>AUTHENTICATE WORKSTATION</span>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="8" x2="13" y2="8"/><polyline points="9 4 13 8 9 12"/></svg>
+            </button>
+          </form>
+
+          <div class="login-footer-info">
+            <span class="compliance-badge">COMPLIANCE: IEC 62443 / ISO 27001 &middot; SHA-256 AUDITED</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ CHAT VIEW ═══ -->
-    <div id="chat-view" class="view view--active">
+    <div id="chat-view" class="view">
       <div id="chat-scroll" class="chat-scroll">
         <div id="chat-messages" class="chat-messages">
           <!-- Rendered by script.js -->

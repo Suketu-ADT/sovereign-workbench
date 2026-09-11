@@ -156,3 +156,50 @@ def call_huggingface_vision(
         system_prompt=system_prompt,
         timeout=timeout,
     )
+
+
+def call_huggingface_image(
+    prompt: str,
+    model: str = "black-forest-labs/FLUX.1-schnell",
+    timeout: float = 60.0,
+) -> bytes:
+    """
+    Calls Hugging Face Inference Providers API for text-to-image / schematic synthesis with FLUX.1-schnell.
+    Returns binary image bytes (JPEG/PNG).
+    Ensures zero credential leakage on failure.
+    """
+    import httpx
+
+    token = os.getenv("HF_TOKEN") or getattr(settings, "HF_TOKEN", None)
+    if not token:
+        raise RuntimeError("HF_TOKEN is not configured. Hugging Face FLUX.1 image API is unavailable.")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    urls = [
+        f"https://router.huggingface.co/hf-inference/models/{model}",
+        f"https://api-inference.huggingface.co/models/{model}",
+    ]
+
+    last_err = None
+    with httpx.Client(timeout=timeout) as client:
+        for url in urls:
+            try:
+                response = client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "inputs": prompt,
+                        "parameters": {"num_inference_steps": 4}
+                    },
+                )
+                if response.status_code == 200 and len(response.content) > 100:
+                    return response.content
+                last_err = f"HTTP {response.status_code}: {_sanitize(response.text)}"
+            except Exception as exc:
+                last_err = _sanitize(str(exc))
+                continue
+
+    raise RuntimeError(f"Hugging Face FLUX.1 image generation failed: {last_err}")
