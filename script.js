@@ -640,8 +640,9 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function loadAuditLog() {
+    if (!state.token) return;
     var headers = {};
-    if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+    headers['Authorization'] = 'Bearer ' + state.token;
     return fetch(API_BASE + '/audit?limit=50', { headers: headers })
       .then(function(res) {
         if (!res.ok) return null;
@@ -2760,8 +2761,10 @@ document.addEventListener('DOMContentLoaded', function () {
   // Switch to Home landing view
   switchView('home');
 
-  // Load verified audit chain from backend
-  loadAuditLog();
+  // Load verified audit chain from backend if authenticated
+  if (state.token) {
+    loadAuditLog();
+  }
 
   // Handle mobile sidebar initial state
   if (isMobile()) {
