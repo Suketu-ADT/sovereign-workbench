@@ -2,23 +2,60 @@
 Query request/response schemas for the defense pipeline.
 """
 
+from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
 class QueryRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=4096)
+    text: str = Field(default="", max_length=4096)
+    message: str | None = Field(default=None, max_length=4096)
+    conversation_id: str | None = None
+    document_ids: list[str] = Field(default_factory=list)
+    model: str | None = None
     has_image: bool = False
     image_data: str | None = Field(default=None, max_length=10_000_000)  # Max 10MB raw base64 string
 
-    @field_validator("text")
+    @field_validator("text", mode="before")
     @classmethod
-    def validate_text(cls, v: str) -> str:
-        if "\x00" in v:
+    def validate_text(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v)
+        if "\x00" in s:
             raise ValueError("Null bytes not permitted in query text")
-        stripped = v.strip()
-        if not stripped:
-            raise ValueError("Query text cannot be empty whitespace")
-        return stripped
+        return s
+
+    def get_query_text(self) -> str:
+        """Returns effective query string whether sent as 'text' or 'message'."""
+        t = (self.text or "").strip()
+        if not t and self.message:
+            t = self.message.strip()
+        return t
+
+
+class DocumentCitation(BaseModel):
+    filename: str
+    page: int
+    page_number: int | None = None
+    chunk_id: str
+    snippet: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.page_number is None and self.page is not None:
+            self.page_number = self.page
+        elif self.page is None and self.page_number is not None:
+            self.page = self.page_number
+
+
+class DocumentUploadResponse(BaseModel):
+    document_id: str
+    filename: str
+    status: str  # "processed", "ocr_required", "failed"
+    page_count: int
+    chunk_count: int
+    message: str
+    format: str = "pdf"
+    ocr_applied: bool = False
 
 
 class RetrievedChunk(BaseModel):
@@ -88,3 +125,5 @@ class QueryResponse(BaseModel):
     thread_id: str | None = None
     final_synthesis: str | None = None
     model_routing: dict | None = None
+    citations: list[DocumentCitation] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)

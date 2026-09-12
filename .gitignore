@@ -24,7 +24,7 @@ qdrant_storage/
 backend/qdrant_storage/
 data/
 
-# Environment Secrets
+# Environment Secrets & Private Keys
 .env
 .env.*
 *.env
@@ -32,6 +32,10 @@ data/
 backend/.env
 backend/.env.*
 !backend/.env.example
+*.pem
+*.key
+backend/keys/
+
 
 # Docker Volumes
 pgdata/

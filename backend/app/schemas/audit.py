@@ -27,17 +27,54 @@ class AuditListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class AuditCheckpointResponse(BaseModel):
+    checkpoint_id: str
+    created_at: datetime
+    entry_count: int
+    head_hash: str
+    signature: str
+    key_id: str
+
+    model_config = {"from_attributes": True}
+
+
 class AuditVerifyResponse(BaseModel):
     valid: bool
     entries_checked: int
     broken_at_index: int | None = None
+    chain_valid: bool | None = None
+    checkpoint_valid: bool | None = None
+    signature_valid: bool | None = None
+    head_hash: str | None = None
+    broken_expected_hash: str | None = None
+    broken_stored_hash: str | None = None
+    checkpoint: dict[str, Any] | None = None
+    verified_at: str | None = None
+
+
+class AuditIntegrityResponse(BaseModel):
+    status: str
+    algorithm: str = "SHA-256"
+    entries_checked: int
+    chain_valid: bool
+    checkpoint_valid: bool
+    signature_valid: bool
+    head_hash: str
+    broken_at_index: int | None = None
+    broken_expected_hash: str | None = None
+    broken_stored_hash: str | None = None
+    checkpoint: dict[str, Any] | None = None
+    verified_at: str
 
 
 class AuditExportResponse(BaseModel):
     exportTimestamp: str
     system: str
+    algorithm: str = "SHA-256"
     genesisHash: str
     currentHeadHash: str
     entryCount: int
+    checkpoint: dict[str, Any] | None = None
     operator: dict[str, Any] | None = None
     ledger: list[AuditEntryResponse]
+

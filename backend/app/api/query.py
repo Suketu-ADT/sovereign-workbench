@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.approval import PendingApproval
-from app.schemas.query import HITLApprovalDetails, QueryRequest, QueryResponse
+from app.schemas.query import DocumentCitation, HITLApprovalDetails, QueryRequest, QueryResponse
 from app.services import (
     audit_service,
     calculation_service,
@@ -30,6 +30,8 @@ from app.services import (
     retrieval_service,
     vision_service,
 )
+from app.services.document_service import document_service
+from app.services.model_provider import get_provider
 from app.services.model_router import route_request
 
 
@@ -87,10 +89,11 @@ async def submit_query(
     if x_model_base_url:
         settings.LLM_BASE_URL = x_model_base_url
 
+    query_text = body.get_query_text()
     user_id = uuid.UUID(current_user["sub"])
     clearance = current_user["clearance_level"]
     has_image_requested = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
-    routing = route_request(body.text, has_image=has_image_requested)
+    routing = route_request(query_text, has_image=has_image_requested)
 
     # ── Step 1: Rate limit check ──────────────────────────────
     allowed, retry_after = rate_limiter.check_rate_limit(user_id)
@@ -114,7 +117,7 @@ async def submit_query(
         )
 
     # ── Step 2: Prompt safety check (PromptGuard) ─────────────
-    safe, reason = await prompt_guard.is_safe(body.text)
+    safe, reason = await prompt_guard.is_safe(query_text)
 
     if not safe:
         async with audit_service.audit_transaction(db):
@@ -135,7 +138,7 @@ async def submit_query(
         )
 
     # ── Step 3: RBAC check ────────────────────────────────────
-    rbac_allowed, required_level = rbac_service.check_access(body.text, clearance)
+    rbac_allowed, required_level = rbac_service.check_access(query_text, clearance)
 
     if not rbac_allowed:
         async with audit_service.audit_transaction(db):
@@ -159,8 +162,103 @@ async def submit_query(
             },
         )
 
-    # ── Step 4: Document Retrieval & Query Acceptance ────────
-    lower_text = body.text.lower()
+    # ── Check for Active Document Scope (Document Grounding RAG) ─
+    active_doc_ids = list(body.document_ids or [])
+    if not active_doc_ids and body.conversation_id:
+        active_doc_ids = document_service.get_conversation_documents(body.conversation_id)
+    elif active_doc_ids and body.conversation_id:
+        document_service.set_conversation_document(body.conversation_id, active_doc_ids)
+
+    if active_doc_ids:
+        # Document Grounding RAG Pipeline
+        doc_chunks = retrieval_service.retrieve_document_chunks(
+            query=query_text,
+            user_id=str(user_id),
+            document_ids=active_doc_ids,
+            top_k=5,
+        )
+
+        citations = [
+            DocumentCitation(
+                filename=c.filename,
+                page=c.page_number,
+                chunk_id=c.chunk_id,
+                snippet=c.text[:200],
+            )
+            for c in doc_chunks
+        ]
+        seen_sources = set()
+        sources = []
+        for c in doc_chunks:
+            s = f"{c.filename} — Page {c.page_number}"
+            if s not in seen_sources:
+                seen_sources.add(s)
+                sources.append(s)
+
+        system_prompt, user_prompt = document_service.build_grounded_prompt(
+            query=query_text,
+            chunks=doc_chunks,
+        )
+
+        doc_routing = route_request(query_text, task_type="document")
+        selected_model = body.model or doc_routing["model"]
+        provider = get_provider(doc_routing["provider"])
+        answer = await provider.generate_async(
+            model=selected_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+
+        calc_result = await calculation_service.evaluate_operational_calculation(
+            query=query_text,
+            doc_chunks=doc_chunks,
+            equipment_unit="boiler-102",
+        )
+
+        async with audit_service.audit_transaction(db):
+            await audit_service.append_entry(
+                db=db,
+                event_type="DOCUMENT_RETRIEVED",
+                detail=f"Retrieved {len(doc_chunks)} chunks for documents {active_doc_ids}",
+                actor_user_id=user_id,
+            )
+            await audit_service.append_entry(
+                db=db,
+                event_type="DOCUMENT_QUERY",
+                detail=f"Document query processed: {query_text[:120]} (chunks: {len(doc_chunks)})",
+                actor_user_id=user_id,
+            )
+            await audit_service.append_entry(
+                db=db,
+                event_type="CALCULATION_RESULT",
+                detail=(
+                    f"Sandboxed formula '{calc_result.formula}' evaluated to "
+                    f"{calc_result.pressure_drop} {calc_result.unit} "
+                    f"(nominal range: {calc_result.normal_range}) — Status: {calc_result.status}"
+                ),
+                actor_user_id=user_id,
+            )
+            await audit_service.append_entry(
+                db=db,
+                event_type="QUERY_COMPLETE",
+                detail=f"Document grounded query completed: {len(doc_chunks)} chunks retrieved, model={selected_model}",
+                actor_user_id=user_id,
+            )
+            await db.commit()
+
+        return QueryResponse(
+            status="accepted_stub",
+            note=f"Grounded response generated using {len(doc_chunks)} document chunks",
+            retrieved_chunks=[],
+            citations=citations,
+            sources=sources,
+            calculation_result=calc_result,
+            final_synthesis=answer,
+            model_routing=doc_routing,
+        )
+
+    # ── Step 4: Plant Manual Retrieval & Query Acceptance ──────
+    lower_text = query_text.lower()
     is_plant_related = any(k in lower_text for k in [
         "boiler", "turbine", "reactor", "pump", "valve", "pipe", "plant",
         "sop", "manual", "pressure", "temperature", "drum", "bms", "feedwater",
@@ -169,15 +267,16 @@ async def submit_query(
     is_coding_task = routing.get("task_type") in ("coding", "debugging")
     if is_coding_task:
         retrieved_chunks = []
-    elif has_image_requested and not is_gauge_query(body.text) and not is_plant_related:
+    elif has_image_requested and not is_gauge_query(query_text) and not is_plant_related:
         retrieved_chunks = []
     elif is_plant_related or any(k in lower_text for k in ["sop", "manual", "procedure", "spec", "standard"]):
         retrieved_chunks = retrieval_service.retrieve(
-            query=body.text,
+            query=query_text,
             operator_clearance=clearance,
         )
     else:
         retrieved_chunks = []
+
 
     # Determine equipment unit from query context
     if "reactor" in lower_text:
@@ -214,6 +313,11 @@ async def submit_query(
         calc_result = await calculation_service.compute_differential_pressure(
             inlet_pressure=vision_result.reading,
             outlet_pressure=2.6,
+            equipment_unit=unit,
+        )
+    elif not (has_image_requested and not is_gauge_query(query_text)):
+        calc_result = await calculation_service.evaluate_operational_calculation(
+            query=query_text,
             equipment_unit=unit,
         )
 
@@ -429,16 +533,24 @@ async def stream_query(
 
     async def event_generator():
         t0 = time.time()
+        query_text = body.get_query_text()
         user_id = uuid.UUID(current_user["sub"])
         clearance = current_user["clearance_level"]
         operator_email = current_user.get("email", "")
         has_image = bool(body.has_image or (body.image_data and str(body.image_data).strip()))
 
+        active_doc_ids = list(body.document_ids or [])
+        if not active_doc_ids and body.conversation_id:
+            active_doc_ids = document_service.get_conversation_documents(body.conversation_id)
+        elif active_doc_ids and body.conversation_id:
+            document_service.set_conversation_document(body.conversation_id, active_doc_ids)
+
         yield _sse_event("init", {
-            "query": body.text,
+            "query": query_text,
             "clearance": clearance,
             "user": operator_email,
             "has_image": has_image,
+            "document_ids": active_doc_ids,
         })
         await asyncio.sleep(0.04)
 
@@ -486,7 +598,7 @@ async def stream_query(
             "label": "Prompt Safety Check",
             "desc": "Injection & adversarial scan",
         })
-        safe, reason = await prompt_guard.is_safe(body.text)
+        safe, reason = await prompt_guard.is_safe(query_text)
         if not safe:
             async with async_session_factory() as db:
                 async with audit_service.audit_transaction(db):
@@ -517,11 +629,15 @@ async def stream_query(
         await asyncio.sleep(0.04)
 
         # ── Step 2b: Dynamic Model Routing & Task Classification ──
-        routing = route_request(body.text, has_image=has_image)
+        if active_doc_ids:
+            routing = route_request(query_text, task_type="document")
+        else:
+            routing = route_request(query_text, has_image=has_image)
+        selected_model = body.model or routing["model"]
         yield _sse_event("model_routing", {
             "task_type": routing["task_type"],
             "provider": routing["provider"],
-            "model": routing["model"],
+            "model": selected_model,
             "sandboxed": routing.get("sandboxed", False),
             "sovereign_mode": settings.SOVEREIGN_MODE,
         })
@@ -534,7 +650,7 @@ async def stream_query(
             "label": "RBAC Verification",
             "desc": "Role-capability authorization",
         })
-        rbac_allowed, required_level = rbac_service.check_access(body.text, clearance)
+        rbac_allowed, required_level = rbac_service.check_access(query_text, clearance)
         if not rbac_allowed:
             async with async_session_factory() as db:
                 async with audit_service.audit_transaction(db):
@@ -570,13 +686,208 @@ async def stream_query(
         })
         await asyncio.sleep(0.04)
 
-        # ── Step 4: Document Retrieval ────────────────────────
+        # ── Dedicated Document Grounding RAG Execution Path ─────
+        if active_doc_ids:
+            t_doc = time.time()
+            yield _sse_event("step_start", {
+                "step": "doc-retrieval",
+                "label": "Document Vector Retrieval",
+                "desc": f"Semantic search over {len(active_doc_ids)} document(s) in Qdrant",
+            })
+            doc_chunks = retrieval_service.retrieve_document_chunks(
+                query=query_text,
+                user_id=str(user_id),
+                document_ids=active_doc_ids,
+                top_k=5,
+            )
+            citations = [
+                DocumentCitation(
+                    filename=c.filename,
+                    page=c.page_number,
+                    chunk_id=c.chunk_id,
+                    snippet=c.text[:200],
+                )
+                for c in doc_chunks
+            ]
+            seen_sources = set()
+            sources = []
+            for c in doc_chunks:
+                s = f"{c.filename} — Page {c.page_number}"
+                if s not in seen_sources:
+                    seen_sources.add(s)
+                    sources.append(s)
+
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction(db):
+                    await audit_service.append_entry(
+                        db=db,
+                        event_type="DOCUMENT_RETRIEVED",
+                        detail=f"Retrieved {len(doc_chunks)} chunks for documents {active_doc_ids}",
+                        actor_user_id=user_id,
+                    )
+                    await audit_service.append_entry(
+                        db=db,
+                        event_type="DOCUMENT_QUERY",
+                        detail=f"Document query processed: {query_text[:120]} (chunks: {len(doc_chunks)})",
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+
+            elapsed_doc = int((time.time() - t_doc) * 1000)
+            yield _sse_event("step_complete", {
+                "step": "doc-retrieval",
+                "status": "passed",
+                "readout": f"{len(doc_chunks)} chunks retrieved from {len(active_doc_ids)} active document(s)",
+                "chunks": [
+                    {
+                        "chunk_id": c.chunk_id,
+                        "document_id": c.document_id,
+                        "filename": c.filename,
+                        "page_number": c.page_number,
+                        "text": c.text,
+                        "score": c.score,
+                    }
+                    for c in doc_chunks
+                ],
+                "citations": [c.model_dump() for c in citations],
+                "sources": sources,
+                "elapsed_ms": elapsed_doc,
+            })
+            await asyncio.sleep(0.04)
+
+            yield _sse_event("step_complete", {
+                "step": "vision",
+                "status": "skipped",
+                "readout": "Document query — vision telemetry skipped",
+                "elapsed_ms": 0,
+            })
+            await asyncio.sleep(0.02)
+
+            # ── Step 6: Sandboxed Calculation ─────────────────────
+            t_calc = time.time()
+            yield _sse_event("step_start", {
+                "step": "calculation",
+                "label": "Sandboxed Calculation",
+                "desc": "Isolated compute environment",
+            })
+            calc_result = await calculation_service.evaluate_operational_calculation(
+                query=query_text,
+                doc_chunks=doc_chunks,
+                equipment_unit="boiler-102",
+            )
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction(db):
+                    await audit_service.append_entry(
+                        db=db,
+                        event_type="CALCULATION_RESULT",
+                        detail=(
+                            f"Sandboxed formula '{calc_result.formula}' evaluated to "
+                            f"{calc_result.pressure_drop} {calc_result.unit} "
+                            f"(nominal range: {calc_result.normal_range}) — Status: {calc_result.status}"
+                        ),
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            elapsed_calc = max(1, int((time.time() - t_calc) * 1000))
+            yield _sse_event("step_complete", {
+                "step": "calculation",
+                "status": "passed",
+                "readout": f"Δp = {calc_result.pressure_drop} bar | Range: {calc_result.normal_range} | {calc_result.status}",
+                "calculation": calc_result.model_dump(),
+                "elapsed_ms": elapsed_calc,
+            })
+            await asyncio.sleep(0.04)
+
+            t_infer = time.time()
+            yield _sse_event("step_start", {
+                "step": "approval",
+                "label": "Grounded Model Inference",
+                "desc": f"Executing inference via {selected_model}",
+            })
+            system_prompt, user_prompt = document_service.build_grounded_prompt(
+                query=query_text,
+                chunks=doc_chunks,
+            )
+            provider = get_provider(routing["provider"])
+            answer = await provider.generate_async(
+                model=selected_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            elapsed_infer = int((time.time() - t_infer) * 1000)
+            yield _sse_event("step_complete", {
+                "step": "approval",
+                "status": "passed",
+                "readout": f"Grounded response generated via {selected_model}",
+                "elapsed_ms": elapsed_infer,
+            })
+            await asyncio.sleep(0.04)
+
+            t_audit = time.time()
+            yield _sse_event("step_start", {
+                "step": "audit-write",
+                "label": "Audit Log Write",
+                "desc": "Hash-chain entry commitment",
+            })
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction(db):
+                    entry = await audit_service.append_entry(
+                        db=db,
+                        event_type="QUERY_COMPLETE",
+                        detail=f"Document grounded query completed: {len(doc_chunks)} chunks retrieved, model={selected_model}",
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+
+            elapsed_audit = int((time.time() - t_audit) * 1000)
+            audit_payload = {
+                "index": entry.idx,
+                "hash": entry.hash,
+                "prev_hash": entry.prev_hash,
+                "timestamp": entry.timestamp.isoformat(),
+                "event": entry.event_type,
+                "detail": entry.detail,
+            }
+            yield _sse_event("step_complete", {
+                "step": "audit-write",
+                "status": "passed",
+                "readout": f"Committed to tamper-proof block #{entry.idx} (SHA-256 verified)",
+                "entry": audit_payload,
+                "elapsed_ms": elapsed_audit,
+            })
+
+            yield _sse_event("complete", {
+                "status": "completed",
+                "retrieved_chunks": [],
+                "document_chunks": [
+                    {
+                        "chunk_id": c.chunk_id,
+                        "document_id": c.document_id,
+                        "filename": c.filename,
+                        "page_number": c.page_number,
+                        "text": c.text,
+                        "score": c.score,
+                    }
+                    for c in doc_chunks
+                ],
+                "citations": [c.model_dump() for c in citations],
+                "sources": sources,
+                "calculation_result": calc_result.model_dump() if calc_result else None,
+                "final_synthesis": answer,
+                "model_routing": routing,
+                "audit_entry": audit_payload,
+                "total_elapsed_ms": int((time.time() - t0) * 1000),
+            })
+            return
+
+        # ── Step 4: Plant Manual Retrieval ────────────────────
         t_step = time.time()
         yield _sse_event("step_start", {
             "step": "doc-retrieval",
             "label": "Document Retrieval",
             "desc": "Role-filtered manual lookup",
         })
+
         lower_text = body.text.lower()
         is_plant_related = any(k in lower_text for k in [
             "boiler", "turbine", "reactor", "pump", "valve", "pipe", "plant",
@@ -825,18 +1136,40 @@ async def stream_query(
                 "calculation": calc_result.model_dump(),
                 "elapsed_ms": elapsed,
             })
-        else:
+        elif has_image and not is_gauge_query(body.text):
             elapsed = int((time.time() - t_step) * 1000)
-            calc_msg = (
-                "Calculation skipped: visual asset is a conceptual diagram/workflow, not an operational pressure gauge"
-                if (has_image and not is_gauge_query(body.text))
-                else "Calculation skipped: no verified visual telemetry reading"
-            )
+            calc_msg = "Calculation skipped: visual asset is a conceptual diagram/workflow, not an operational pressure gauge"
             yield _sse_event("step_complete", {
                 "step": "calculation",
                 "status": "skipped",
                 "readout": calc_msg,
                 "calculation": None,
+                "elapsed_ms": elapsed,
+            })
+        else:
+            calc_result = await calculation_service.evaluate_operational_calculation(
+                query=body.text,
+                equipment_unit=unit,
+            )
+            async with async_session_factory() as db:
+                async with audit_service.audit_transaction(db):
+                    await audit_service.append_entry(
+                        db=db,
+                        event_type="CALCULATION_RESULT",
+                        detail=(
+                            f"Sandboxed formula '{calc_result.formula}' evaluated to "
+                            f"{calc_result.pressure_drop} {calc_result.unit} "
+                            f"(nominal range: {calc_result.normal_range}) — Status: {calc_result.status}"
+                        ),
+                        actor_user_id=user_id,
+                    )
+                    await db.commit()
+            elapsed = max(1, int((time.time() - t_step) * 1000))
+            yield _sse_event("step_complete", {
+                "step": "calculation",
+                "status": "passed",
+                "readout": f"Δp = {calc_result.pressure_drop} bar | Range: {calc_result.normal_range} | {calc_result.status}",
+                "calculation": calc_result.model_dump(),
                 "elapsed_ms": elapsed,
             })
         await asyncio.sleep(0.04)

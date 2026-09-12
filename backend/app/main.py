@@ -15,7 +15,7 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api import ai, approvals, audit, auth, query
+from app.api import ai, approvals, audit, auth, documents, query
 from app.core.config import settings
 from app.db.migrate import run_migrations
 from app.db.seed import seed_database
@@ -118,6 +118,7 @@ async def add_security_headers(request, call_next):
 # ── Mount routers ─────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(query.router)
+app.include_router(documents.router)
 app.include_router(audit.router)
 app.include_router(approvals.router)
 app.include_router(ai.router)

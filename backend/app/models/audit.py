@@ -35,3 +35,24 @@ class AuditEntry(Base):
     )
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class AuditCheckpoint(Base):
+    __tablename__ = "audit_checkpoints"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    checkpoint_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    entry_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    head_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    signature: Mapped[str] = mapped_column(Text, nullable=False)
+    key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+

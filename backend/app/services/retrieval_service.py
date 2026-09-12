@@ -54,6 +54,18 @@ class FallbackDeterministicEmbedder:
             yield vec
 
 
+from dataclasses import dataclass
+
+@dataclass
+class RetrievedDocumentChunk:
+    chunk_id: str
+    document_id: str
+    filename: str
+    page_number: int
+    text: str
+    score: float
+
+
 class RetrievalService:
     """Manages on-premise vector embeddings and RBAC-filtered retrieval."""
 
@@ -67,6 +79,7 @@ class RetrievalService:
         self.storage_path = storage_path or settings.QDRANT_STORAGE_PATH
         self.url = url or settings.QDRANT_URL
         self.collection_name = collection_name or settings.QDRANT_COLLECTION
+        self.user_doc_collection = "user_documents"
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.client: QdrantClient | None = None
         self.embedder: Any = None
@@ -106,18 +119,19 @@ class RetrievalService:
                 self.client = QdrantClient(":memory:")
 
     def initialize(self, force_reseed: bool = False):
-        """Initializes client, embedder, collection, and seeds operational manuals."""
+        """Initializes client, embedder, collections, and seeds operational manuals."""
         if self._initialized and not force_reseed:
             return
 
         self._init_embedder()
         self._init_client()
 
-        # Check if collection exists
+        # Check collections
         collections = self.client.get_collections().collections
-        exists = any(c.name == self.collection_name for c in collections)
+        exists_manuals = any(c.name == self.collection_name for c in collections)
+        exists_user_docs = any(c.name == self.user_doc_collection for c in collections)
 
-        if not exists:
+        if not exists_manuals:
             logger.info("Creating Qdrant collection '%s' (384-dim COSINE)", self.collection_name)
             self.client.create_collection(
                 collection_name=self.collection_name,
@@ -129,6 +143,13 @@ class RetrievalService:
             if count == 0 or force_reseed:
                 logger.info("Collection '%s' empty or reseed requested; seeding manuals...", self.collection_name)
                 self.seed_manuals()
+
+        if not exists_user_docs:
+            logger.info("Creating Qdrant collection '%s' for user documents (384-dim COSINE)", self.user_doc_collection)
+            self.client.create_collection(
+                collection_name=self.user_doc_collection,
+                vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            )
 
         self._initialized = True
 
@@ -209,6 +230,121 @@ class RetrievalService:
             )
 
         return retrieved
+
+    def embed_text(self, text: str) -> list[float]:
+        """Embeds a single query or text string into a float vector."""
+        if not self._initialized:
+            self.initialize()
+        emb = list(self.embedder.embed([text]))[0]
+        return emb.tolist() if hasattr(emb, "tolist") else [float(x) for x in emb]
+
+    def index_user_chunks(self, user_id: str, chunks: list[Any]) -> None:
+        """Embeds and upserts user document chunks into the user_documents Qdrant collection."""
+        if not self._initialized:
+            self.initialize()
+        if not chunks:
+            return
+
+        texts = [c.text for c in chunks]
+        embeddings = list(self.embedder.embed(texts))
+        points = []
+        for c, emb in zip(chunks, embeddings):
+            point_id = str(uuid.uuid5(_CHUNK_NAMESPACE, c.chunk_id))
+            vec = emb.tolist() if hasattr(emb, "tolist") else list(emb)
+            points.append(
+                PointStruct(
+                    id=point_id,
+                    vector=vec,
+                    payload={
+                        "chunk_id": c.chunk_id,
+                        "document_id": c.document_id,
+                        "filename": c.filename,
+                        "page_number": c.page_number,
+                        "text": c.text,
+                        "user_id": str(user_id),
+                    },
+                )
+            )
+
+        self.client.upsert(
+            collection_name=self.user_doc_collection,
+            points=points,
+        )
+        logger.info("Upserted %d points into '%s' for doc_id=%s", len(points), self.user_doc_collection, chunks[0].document_id)
+
+    def delete_user_document_chunks(self, document_id: str, user_id: str) -> None:
+        """Deletes all chunks belonging to a document under the specified user."""
+        if not self._initialized:
+            self.initialize()
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        delete_filter = Filter(
+            must=[
+                FieldCondition(key="document_id", match=MatchValue(value=document_id)),
+                FieldCondition(key="user_id", match=MatchValue(value=str(user_id))),
+            ]
+        )
+        self.client.delete(
+            collection_name=self.user_doc_collection,
+            points_selector=delete_filter,
+        )
+        logger.info("Deleted chunks for doc_id=%s from '%s'", document_id, self.user_doc_collection)
+
+    def retrieve_document_chunks(
+        self,
+        query: str,
+        document_ids: list[str],
+        user_id: str | None = None,
+        top_k: int = 5,
+    ) -> list[RetrievedDocumentChunk]:
+        """
+        Retrieves top-k relevant document chunks scoped strictly to the given document_ids
+        and isolated to user_id.
+        """
+        if not self._initialized:
+            self.initialize()
+        if not document_ids:
+            return []
+
+        query_emb = list(self.embedder.embed([query]))[0]
+        query_vector = query_emb.tolist() if hasattr(query_emb, "tolist") else list(query_emb)
+
+        from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
+        must_conditions: list[Any] = [
+            FieldCondition(
+                key="document_id",
+                match=MatchAny(any=document_ids),
+            )
+        ]
+        if user_id:
+            must_conditions.append(
+                FieldCondition(
+                    key="user_id",
+                    match=MatchValue(value=str(user_id)),
+                )
+            )
+
+        search_result = self.client.query_points(
+            collection_name=self.user_doc_collection,
+            query=query_vector,
+            query_filter=Filter(must=must_conditions),
+            limit=top_k,
+        )
+
+        results: list[RetrievedDocumentChunk] = []
+        for point in search_result.points:
+            p = point.payload or {}
+            results.append(
+                RetrievedDocumentChunk(
+                    chunk_id=str(p.get("chunk_id", point.id)),
+                    document_id=str(p.get("document_id", "")),
+                    filename=str(p.get("filename", "")),
+                    page_number=int(p.get("page_number", 1)),
+                    text=str(p.get("text", "")),
+                    score=float(point.score if point.score is not None else 0.0),
+                )
+            )
+
+        return results
 
 
 # Singleton instance for application lifetime

@@ -503,14 +503,58 @@ assert delta_p &lt;= 5.0  # 3.8 bar [NOMINAL]</code></pre>
               </svg>
             </button>
           </div>
+
+          <!-- Document Upload & Processing Status Card -->
+          <div id="document-preview" class="document-preview-card" hidden>
+            <div class="doc-preview-left">
+              <div class="doc-preview-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+              </div>
+              <div class="doc-preview-meta">
+                <div class="doc-preview-title-row">
+                  <span class="doc-preview-name" id="doc-preview-name">document.pdf</span>
+                  <span class="doc-format-badge" id="doc-format-badge">PDF</span>
+                </div>
+                <div class="doc-preview-sub">
+                  <span id="doc-page-count">0 pages</span> &middot; 
+                  <span class="doc-status-badge" id="doc-status-badge">
+                    <span class="doc-status-spinner" id="doc-spinner"></span>
+                    <span id="doc-status-text">Processing...</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-preview-actions">
+              <button type="button" id="btn-replace-doc" class="doc-action-btn" title="Replace document">
+                <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 4v4h4M15 12v-4h-4"/><path d="M2.5 9a6 6 0 0 0 9.8 2.5L15 8M13.5 7a6 6 0 0 0-9.8-2.5L1 8"/></svg>
+                <span>Replace</span>
+              </button>
+              <button type="button" id="btn-add-doc" class="doc-action-btn" title="Upload another document">
+                <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/></svg>
+                <span>Add Doc</span>
+              </button>
+              <button type="button" id="btn-remove-doc" class="doc-remove-btn" aria-label="Remove document" title="Remove document">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
           <div class="chat-input-row">
-            <label class="input-attach-btn" id="label-attach" tabindex="0" title="Attach image">
+            <label class="input-attach-btn" id="label-attach" tabindex="0" title="Attach document (PDF, Word, Excel, PowerPoint, CSV, JSON, Text, or Image with OCR)">
               <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M17 10l-7 7a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54l-7 7a1 1 0 01-1.42-1.42l7-7"/>
               </svg>
-              <input type="file" id="image-attach" accept="image/*" hidden>
+              <input type="file" id="image-attach" accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.csv,.tsv,.json,.txt,.md,.yaml,.yml,.log,.png,.jpg,.jpeg,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/csv,application/json,text/plain,image/*" hidden>
             </label>
-            <textarea id="chat-input" rows="1" placeholder="Ask Sovereign Workbench about equipment, logs, telemetry..." aria-label="Message input"></textarea>
+            <textarea id="chat-input" rows="1" placeholder="Ask Sovereign Workbench about equipment, logs, telemetry, or attached documents..." aria-label="Message input"></textarea>
             <button type="button" id="btn-send" class="input-send-btn" disabled aria-label="Send message">
               <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <line x1="10" y1="16" x2="10" y2="4"/><polyline points="5,9 10,4 15,9"/>
@@ -568,12 +612,123 @@ assert delta_p &lt;= 5.0  # 3.8 bar [NOMINAL]</code></pre>
     <div id="audit-view" class="view">
       <div class="audit-page">
         <div class="audit-container panel-frame">
-          <div class="panel-header">
-            <span class="panel-label">HASH-CHAIN AUDIT LOG</span>
-            <span class="audit-count" id="audit-count">0 entries</span>
+          <!-- Security Console Header -->
+          <div class="panel-header audit-console-header">
+            <div class="audit-header-title-group">
+              <div class="audit-shield-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+                  <path d="M10 2L3 5v5.5c0 4.5 3 7.8 7 8.5 4-.7 7-4 7-8.5V5l-7-3Z"/>
+                  <polyline points="7.5 10 9.5 12 13 8"/>
+                </svg>
+              </div>
+              <div>
+                <div class="audit-header-main-row">
+                  <span class="panel-label">TAMPER-EVIDENT AUDIT LEDGER</span>
+                  <span class="audit-integrity-badge tag--green" id="audit-integrity-badge">
+                    <span class="audit-pulse-dot"></span>
+                    <span id="audit-badge-text">✓ CRYPTOGRAPHIC INTEGRITY VERIFIED</span>
+                  </span>
+                </div>
+                <div class="audit-header-subtitle">
+                  SHA-256 Recursive Chaining &middot; Canonical JSON &middot; Ed25519 Signed Checkpoints
+                </div>
+              </div>
+            </div>
+            <div class="audit-header-actions">
+              <button type="button" id="btn-verify-audit" class="btn-audit-action btn-audit-primary" title="Execute full cryptographic verification across all blocks and signed checkpoints">
+                <svg class="icon-verify" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5v2"/>
+                  <polyline points="10 2.5 8 4.5 6 2.5"/>
+                </svg>
+                <span id="verify-btn-text">Verify Audit Integrity</span>
+              </button>
+              <button type="button" id="btn-export-audit" class="btn-audit-action btn-audit-secondary" title="Export complete audit ledger with signatures and genesis proof">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M2.5 10.5v3a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-3"/>
+                  <polyline points="5 7 8 10 11 7"/>
+                  <line x1="8" y1="2" x2="8" y2="10"/>
+                </svg>
+                <span>Export Ledger</span>
+              </button>
+              <button type="button" id="btn-checkpoint-audit" class="btn-audit-action btn-audit-ghost" title="Generate on-demand Ed25519 signed cryptographic checkpoint">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <circle cx="8" cy="8" r="6"/>
+                  <path d="M8 5v6M5 8h6"/>
+                </svg>
+                <span>Sign Checkpoint</span>
+              </button>
+            </div>
           </div>
-          <div id="audit-entries" class="audit-entries">
-            <!-- Rendered by script.js -->
+
+          <!-- Hero Telemetry & Integrity Ribbon -->
+          <div class="audit-telemetry-ribbon">
+            <div class="audit-telemetry-chip">
+              <span class="audit-chip-label">BLOCKS VERIFIED</span>
+              <span class="audit-chip-value" id="audit-telemetry-count">0</span>
+              <span class="audit-chip-sub">Zero forks detected</span>
+            </div>
+            <div class="audit-telemetry-chip">
+              <span class="audit-chip-label">HASH ALGORITHM</span>
+              <span class="audit-chip-value mono-val">SHA-256</span>
+              <span class="audit-chip-sub">NIST FIPS 180-4</span>
+            </div>
+            <div class="audit-telemetry-chip">
+              <span class="audit-chip-label">CHAIN ARCHITECTURE</span>
+              <span class="audit-chip-value">Hash Chained</span>
+              <span class="audit-chip-sub">H<sub>i</sub> = SHA256(H<sub>i-1</sub> + Event<sub>i</sub>)</span>
+            </div>
+            <div class="audit-telemetry-chip">
+              <span class="audit-chip-label">SIGNED CHECKPOINT</span>
+              <span class="audit-chip-value" id="audit-telemetry-checkpoint">Ed25519 Active</span>
+              <span class="audit-chip-sub" id="audit-telemetry-keyid">Key: audit-key-01</span>
+            </div>
+            <div class="audit-telemetry-chip audit-telemetry-chip--wide">
+              <div class="audit-head-row">
+                <span class="audit-chip-label">CURRENT CHAIN HEAD</span>
+                <button type="button" class="btn-copy-chip-hash" id="btn-copy-head-hash" title="Copy head hash">
+                  <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M10 4V2.5A1.5 1.5 0 0 0 8.5 1h-6A1.5 1.5 0 0 0 1 2.5v6A1.5 1.5 0 0 0 2.5 10H4"/></svg>
+                  <span>Copy</span>
+                </button>
+              </div>
+              <span class="audit-chip-value mono-val audit-head-hash-text" id="audit-telemetry-head">0000000000000000&hellip;</span>
+              <span class="audit-chip-sub" id="audit-telemetry-verified-at">Awaiting verification run</span>
+            </div>
+          </div>
+
+          <!-- Dynamic Verification Alert Banner -->
+          <div id="audit-diagnostic-banner" class="audit-diagnostic-banner audit-diagnostic-banner--idle" hidden>
+            <div class="diagnostic-banner-inner">
+              <div class="diagnostic-icon-wrap" id="diagnostic-icon-wrap">
+                <!-- Icon injected by JS -->
+              </div>
+              <div class="diagnostic-content">
+                <div class="diagnostic-title" id="diagnostic-title">AUDIT INTEGRITY VERIFIED</div>
+                <div class="diagnostic-details" id="diagnostic-details">All blocks checked and cryptographically valid.</div>
+              </div>
+              <div class="diagnostic-meta" id="diagnostic-meta"></div>
+            </div>
+          </div>
+
+          <!-- Visual Chain Flow Visualizer -->
+          <div class="audit-chain-section">
+            <div class="audit-chain-section-header">
+              <span class="chain-section-label">CRYPTOGRAPHIC CHAIN FLOW</span>
+              <span class="chain-section-sub">Visualizing sequential block dependency from Genesis (H<sub>0</sub>) to Head (H<sub>n</sub>)</span>
+            </div>
+            <div class="audit-chain-visual-track" id="audit-chain-visual-track">
+              <!-- Rendered by script.js -->
+            </div>
+          </div>
+
+          <!-- Ledger Table Header & Entries Container -->
+          <div class="audit-ledger-section">
+            <div class="audit-ledger-section-header">
+              <span class="ledger-section-label">AUDIT EVENT BLOCKS</span>
+              <span class="audit-count-badge" id="audit-count">0 entries</span>
+            </div>
+            <div id="audit-entries" class="audit-entries">
+              <!-- Rendered by script.js -->
+            </div>
           </div>
         </div>
       </div>

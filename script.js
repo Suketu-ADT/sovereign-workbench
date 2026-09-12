@@ -156,6 +156,10 @@ document.addEventListener('DOMContentLoaded', function () {
     imageAttached: false,
     imageName: '',
     imageData: null,
+    activeDocuments: [],
+    activeDocumentIds: [],
+    documentProcessing: false,
+    appendDocMode: false,
     token: null,
     auditLog: [],
     lastHash: '0'.repeat(64),
@@ -200,14 +204,45 @@ document.addEventListener('DOMContentLoaded', function () {
     previewThumb:   $('preview-thumb'),
     previewName:    $('preview-name'),
     btnRemoveImg:   $('btn-remove-img'),
+    documentPreview:$('document-preview'),
+    docPreviewName: $('doc-preview-name'),
+    docFormatBadge: $('doc-format-badge'),
+    docPageCount:   $('doc-page-count'),
+    docStatusBadge: $('doc-status-badge'),
+    docSpinner:     $('doc-spinner'),
+    docStatusText:  $('doc-status-text'),
+    btnReplaceDoc:  $('btn-replace-doc'),
+    btnAddDoc:      $('btn-add-doc'),
+    btnRemoveDoc:   $('btn-remove-doc'),
     btnDemo:        $('btn-demo'),
     btnSend:        $('btn-send'),
     pipelineSteps:  $('pipeline-steps'),
     pipelineStatus: $('pipeline-status'),
     pipelineEmpty:  $('pipeline-empty'),
+
     auditEntries:   $('audit-entries'),
+
     auditCount:     $('audit-count'),
+    btnVerifyAudit:          $('btn-verify-audit'),
+    btnExportAudit:          $('btn-export-audit'),
+    btnCheckpointAudit:      $('btn-checkpoint-audit'),
+    auditIntegrityBadge:     $('audit-integrity-badge'),
+    auditBadgeText:          $('audit-badge-text'),
+    auditDiagnosticBanner:   $('audit-diagnostic-banner'),
+    diagnosticTitle:         $('diagnostic-title'),
+    diagnosticDetails:       $('diagnostic-details'),
+    diagnosticMeta:          $('diagnostic-meta'),
+    diagnosticIconWrap:      $('diagnostic-icon-wrap'),
+    auditTelemetryCount:     $('audit-telemetry-count'),
+    auditTelemetryCheckpoint:$('audit-telemetry-checkpoint'),
+    auditTelemetryKeyid:     $('audit-telemetry-keyid'),
+    auditTelemetryHead:      $('audit-telemetry-head'),
+    auditTelemetryVerifiedAt:$('audit-telemetry-verified-at'),
+    btnCopyHeadHash:         $('btn-copy-head-hash'),
+    auditChainVisualTrack:   $('audit-chain-visual-track'),
+    verifyBtnText:           $('verify-btn-text'),
     approvalDialog: $('approval-dialog'),
+
     approvalAction: $('approval-action'),
     approvalTarget: $('approval-target'),
     approvalRequestor:$('approval-requestor'),
@@ -639,36 +674,293 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  function loadAuditLog() {
-    if (!state.token) return;
+  // ── AUDIT LOG & CRYPTOGRAPHIC LEDGER ────────────────────────
+
+  function copyHashToClipboard(text, btnEl) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        showCopyFeedback(btnEl);
+      }).catch(function() {
+        fallbackCopyText(text, btnEl);
+      });
+    } else {
+      fallbackCopyText(text, btnEl);
+    }
+  }
+
+  function fallbackCopyText(text, btnEl) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      showCopyFeedback(btnEl);
+    } catch (e) {
+      console.warn('Copy failed:', e);
+    }
+    document.body.removeChild(ta);
+  }
+
+  function showCopyFeedback(btnEl) {
+    if (!btnEl) return;
+    var origHTML = btnEl.innerHTML;
+    btnEl.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="#10b981" stroke-width="2"><polyline points="3 8 7 12 13 4"/></svg> <span style="color:#10b981">Copied!</span>';
+    setTimeout(function() {
+      btnEl.innerHTML = origHTML;
+    }, 1400);
+  }
+
+  function loadAuditLog(skipVerification) {
     var headers = {};
-    headers['Authorization'] = 'Bearer ' + state.token;
-    return fetch(API_BASE + '/audit?limit=50', { headers: headers })
+    if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+
+    return fetch(API_BASE + '/audit?limit=100', { headers: headers })
       .then(function(res) {
         if (!res.ok) return null;
         return res.json();
       })
       .then(function(data) {
-        if (data && data.entries && data.entries.length > 0) {
-          state.auditLog = data.entries.map(function(e) {
+        if (data && data.entries) {
+          // Sort chronologically ascending
+          var sorted = data.entries.slice().sort(function(a, b) {
+            var ia = a.index !== undefined ? a.index : a.idx;
+            var ib = b.index !== undefined ? b.index : b.idx;
+            return ia - ib;
+          });
+
+          state.auditLog = sorted.map(function(e) {
             return {
               index: e.index !== undefined ? e.index : e.idx,
               timestamp: e.timestamp,
               event: e.event || e.event_type,
               detail: e.detail,
               hash: e.hash,
-              prevHash: e.prevHash || e.prev_hash
+              prevHash: e.prevHash || e.prev_hash,
+              actor_user_id: e.actor_user_id || null
             };
           });
-          state.lastHash = state.auditLog[0].hash; // top entry
-          if (els.auditCount) {
-            els.auditCount.textContent = state.auditLog.length + ' entries';
+
+          if (state.auditLog.length > 0) {
+            state.lastHash = state.auditLog[state.auditLog.length - 1].hash;
+          } else {
+            state.lastHash = '0'.repeat(64);
           }
+
+          updateAuditTelemetryUI();
           renderAuditLog();
+
+          if (!skipVerification) {
+            checkAuditVerificationSilently();
+          }
         }
       })
-      .catch(function() {
-        // Fallback silently
+      .catch(function(err) {
+        console.warn('Could not fetch audit log from backend:', err);
+      });
+  }
+
+  function updateAuditTelemetryUI(checkpointInfo, verifiedAt) {
+    var count = state.auditLog.length;
+    if (els.auditCount) {
+      els.auditCount.textContent = count + (count === 1 ? ' block' : ' blocks');
+    }
+    if (els.auditTelemetryCount) {
+      els.auditTelemetryCount.textContent = count;
+    }
+    if (els.auditTelemetryHead) {
+      var head = state.lastHash || '0'.repeat(64);
+      els.auditTelemetryHead.textContent = head.substring(0, 16) + '…' + head.substring(56);
+      if (els.btnCopyHeadHash) {
+        els.btnCopyHeadHash.setAttribute('data-full-hash', head);
+      }
+    }
+    if (checkpointInfo) {
+      if (els.auditTelemetryCheckpoint) {
+        els.auditTelemetryCheckpoint.textContent = 'Ed25519 Signed (' + checkpointInfo.entry_count + ')';
+      }
+      if (els.auditTelemetryKeyid) {
+        els.auditTelemetryKeyid.textContent = 'Key: ' + (checkpointInfo.key_id || 'audit-key-01');
+      }
+    }
+    if (verifiedAt && els.auditTelemetryVerifiedAt) {
+      var timeStr = typeof verifiedAt === 'string' && verifiedAt.indexOf('T') !== -1
+        ? verifiedAt.split('T')[1].split('.')[0] + ' UTC'
+        : verifiedAt;
+      els.auditTelemetryVerifiedAt.textContent = 'Verified: ' + timeStr;
+    }
+  }
+
+  function checkAuditVerificationSilently() {
+    var headers = {};
+    if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+
+    fetch(API_BASE + '/audit/verify', { headers: headers })
+      .then(function(res) {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then(function(ver) {
+        if (!ver) return;
+        updateAuditTelemetryUI(ver.checkpoint, ver.verified_at);
+        if (ver.valid) {
+          if (els.auditIntegrityBadge) {
+            els.auditIntegrityBadge.className = 'audit-integrity-badge tag--green';
+          }
+          if (els.auditBadgeText) {
+            els.auditBadgeText.textContent = '✓ CRYPTOGRAPHIC INTEGRITY VERIFIED';
+          }
+        } else {
+          if (els.auditIntegrityBadge) {
+            els.auditIntegrityBadge.className = 'audit-integrity-badge tag--red';
+          }
+          if (els.auditBadgeText) {
+            els.auditBadgeText.textContent = '⚠ AUDIT CHAIN COMPROMISED';
+          }
+          renderAuditLog({
+            brokenAtIndex: ver.broken_at_index,
+            brokenExpectedHash: ver.broken_expected_hash,
+            brokenStoredHash: ver.broken_stored_hash
+          });
+        }
+      })
+      .catch(function() {});
+  }
+
+  function verifyAuditIntegrity() {
+    if (els.btnVerifyAudit) {
+      els.btnVerifyAudit.classList.add('is-verifying');
+    }
+    if (els.verifyBtnText) {
+      els.verifyBtnText.textContent = 'VERIFYING AUDIT CHAIN...';
+    }
+    if (els.auditIntegrityBadge) {
+      els.auditIntegrityBadge.className = 'audit-integrity-badge tag--amber';
+    }
+    if (els.auditBadgeText) {
+      els.auditBadgeText.textContent = 'VERIFYING AUDIT CHAIN...';
+    }
+    if (els.auditDiagnosticBanner) {
+      els.auditDiagnosticBanner.hidden = false;
+      els.auditDiagnosticBanner.className = 'audit-diagnostic-banner audit-diagnostic-banner--verifying';
+    }
+    if (els.diagnosticTitle) {
+      els.diagnosticTitle.textContent = 'VERIFYING AUDIT CHAIN...';
+    }
+    if (els.diagnosticDetails) {
+      els.diagnosticDetails.textContent = 'Recalculating SHA-256 recursive digest from Genesis H0 and validating Ed25519 signed checkpoint...';
+    }
+    if (els.diagnosticMeta) {
+      els.diagnosticMeta.textContent = 'In progress';
+    }
+
+    var headers = {};
+    if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+
+    fetch(API_BASE + '/audit/verify', { headers: headers })
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(verData) {
+        setTimeout(function() {
+          if (els.btnVerifyAudit) els.btnVerifyAudit.classList.remove('is-verifying');
+          if (els.verifyBtnText) els.verifyBtnText.textContent = 'Verify Audit Integrity';
+
+          var timeFormatted = verData.verified_at
+            ? (verData.verified_at.split('T')[1] ? verData.verified_at.split('T')[1].split('.')[0] + ' UTC' : verData.verified_at)
+            : new Date().toLocaleTimeString() + ' UTC';
+
+          updateAuditTelemetryUI(verData.checkpoint, timeFormatted);
+
+          if (verData.valid) {
+            if (els.auditIntegrityBadge) {
+              els.auditIntegrityBadge.className = 'audit-integrity-badge tag--green';
+            }
+            if (els.auditBadgeText) {
+              els.auditBadgeText.textContent = '✓ AUDIT CHAIN VERIFIED';
+            }
+            if (els.auditDiagnosticBanner) {
+              els.auditDiagnosticBanner.className = 'audit-diagnostic-banner audit-diagnostic-banner--verified';
+            }
+            if (els.diagnosticTitle) {
+              els.diagnosticTitle.textContent = 'AUDIT INTEGRITY: ✓ VERIFIED';
+            }
+            var checkedCount = verData.entries_checked !== undefined ? verData.entries_checked : state.auditLog.length;
+            var headSub = verData.head_hash ? verData.head_hash.substring(0, 16) + '…' : (state.lastHash ? state.lastHash.substring(0, 16) + '…' : '');
+            if (els.diagnosticDetails) {
+              els.diagnosticDetails.innerHTML = '<strong>' + checkedCount + ' blocks cryptographically verified</strong> &middot; Head: <code>' + headSub + '</code> &middot; Algorithm: SHA-256 &middot; Verified: ' + timeFormatted;
+            }
+            if (els.diagnosticMeta) {
+              els.diagnosticMeta.textContent = 'Chain 100% Intact';
+            }
+            renderAuditLog(null);
+          } else {
+            var brokenIdx = verData.broken_at_index !== null && verData.broken_at_index !== undefined ? verData.broken_at_index : '?';
+            if (els.auditIntegrityBadge) {
+              els.auditIntegrityBadge.className = 'audit-integrity-badge tag--red';
+            }
+            if (els.auditBadgeText) {
+              els.auditBadgeText.textContent = '⚠ AUDIT CHAIN COMPROMISED';
+            }
+            if (els.auditDiagnosticBanner) {
+              els.auditDiagnosticBanner.className = 'audit-diagnostic-banner audit-diagnostic-banner--compromised';
+            }
+            if (els.diagnosticTitle) {
+              els.diagnosticTitle.textContent = 'AUDIT INTEGRITY: ✕ COMPROMISED';
+            }
+            var expH = verData.broken_expected_hash ? verData.broken_expected_hash.substring(0, 16) + '…' : '';
+            var stoH = verData.broken_stored_hash ? verData.broken_stored_hash.substring(0, 16) + '…' : '';
+            if (els.diagnosticDetails) {
+              els.diagnosticDetails.innerHTML = '<strong>Broken at block #' + brokenIdx + '</strong><br>' +
+                (expH ? 'Expected previous hash: <code style="color:var(--text-1)">' + expH + '</code> &middot; ' : '') +
+                (stoH ? 'Stored previous hash: <code style="color:#ef4444">' + stoH + '</code>' : '');
+            }
+            if (els.diagnosticMeta) {
+              els.diagnosticMeta.textContent = 'TAMPER AT #' + brokenIdx;
+            }
+            renderAuditLog({
+              brokenAtIndex: brokenIdx,
+              brokenExpectedHash: verData.broken_expected_hash,
+              brokenStoredHash: verData.broken_stored_hash
+            });
+
+            // Scroll to broken block
+            var brokenEl = document.getElementById('audit-block-' + brokenIdx);
+            if (brokenEl) {
+              brokenEl.classList.add('is-expanded');
+              brokenEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+        }, 350);
+      })
+      .catch(function(err) {
+        if (els.btnVerifyAudit) els.btnVerifyAudit.classList.remove('is-verifying');
+        if (els.verifyBtnText) els.verifyBtnText.textContent = 'Verify Audit Integrity';
+        console.warn('Verification request failed:', err);
+      });
+  }
+
+  function createOnDemandCheckpoint() {
+    if (!state.token) {
+      alert('Authentication required: please log in with Chief Safety Auditor or Admin credentials to sign a checkpoint.');
+      return;
+    }
+    var headers = { 'Authorization': 'Bearer ' + state.token };
+    fetch(API_BASE + '/audit/checkpoint', { method: 'POST', headers: headers })
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(chk) {
+        alert('✓ Ed25519 Checkpoint signed & committed to ledger!\nCheckpoint ID: ' + chk.checkpoint_id + '\nEntry count: ' + chk.entry_count + '\nKey: ' + chk.key_id);
+        loadAuditLog();
+      })
+      .catch(function(err) {
+        alert('Could not sign checkpoint: ' + err.message);
       });
   }
 
@@ -692,7 +984,8 @@ document.addEventListener('DOMContentLoaded', function () {
       .catch(function() {
         var exportData = {
           exportTimestamp: new Date().toISOString(),
-          system: 'Sovereign Workbench Air-Gapped Console',
+          system: 'Sovereign Workbench — Cryptographic Tamper-Evident Audit Ledger',
+          algorithm: 'SHA-256',
           genesisHash: '0000000000000000000000000000000000000000000000000000000000000000',
           currentHeadHash: state.lastHash,
           entryCount: state.auditLog.length,
@@ -712,6 +1005,7 @@ document.addEventListener('DOMContentLoaded', function () {
         dlAnchor.remove();
       });
   }
+
 
 
   // ── SIDEBAR ────────────────────────────────────────────────
@@ -1081,6 +1375,22 @@ document.addEventListener('DOMContentLoaded', function () {
   function handleImageSelect(e) {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
+
+    var nameLower = file.name.toLowerCase();
+    var docExts = [
+      '.pdf', '.docx', '.doc', '.pptx', '.ppt',
+      '.xlsx', '.xls', '.csv', '.tsv', '.json',
+      '.txt', '.md', '.log', '.yaml', '.yml'
+    ];
+    var isDoc = docExts.some(function(ext) { return nameLower.endsWith(ext); });
+
+    // If appendDocMode was set or if it's a document format, route to universal document ingestion
+    if (isDoc || state.appendDocMode) {
+      uploadDocument(file, state.appendDocMode);
+      return;
+    }
+
+    // Default standalone image handling for vision analysis
     state.imageAttached = true;
     state.imageName = file.name;
     els.previewName.textContent = file.name;
@@ -1092,6 +1402,132 @@ document.addEventListener('DOMContentLoaded', function () {
     reader.readAsDataURL(file);
     els.imagePreview.hidden = false;
     updateSendState();
+  }
+
+  function uploadDocument(file, isAppend) {
+    if (!state.user) {
+      openModal(els.authDialog);
+      return;
+    }
+
+    state.documentProcessing = true;
+    updateSendState();
+
+    var ext = file.name.split('.').pop().toLowerCase();
+    var formatClass = 'pdf';
+    if (['docx', 'doc'].indexOf(ext) >= 0) formatClass = 'docx';
+    else if (['xlsx', 'xls'].indexOf(ext) >= 0) formatClass = 'xlsx';
+    else if (['pptx', 'ppt'].indexOf(ext) >= 0) formatClass = 'pptx';
+    else if (['csv', 'tsv'].indexOf(ext) >= 0) formatClass = 'csv';
+    else if (ext === 'json') formatClass = 'json';
+    else if (['png', 'jpg', 'jpeg', 'webp', 'tiff', 'bmp'].indexOf(ext) >= 0) formatClass = 'image';
+    else formatClass = 'text';
+
+    if (els.documentPreview) {
+      els.documentPreview.hidden = false;
+      els.docPreviewName.textContent = file.name;
+      if (els.docFormatBadge) {
+        els.docFormatBadge.className = 'doc-format-badge ' + formatClass;
+        els.docFormatBadge.textContent = ext.toUpperCase();
+      }
+      els.docPageCount.textContent = 'Extracting content...';
+      els.docStatusBadge.className = 'doc-status-badge';
+      if (els.docSpinner) els.docSpinner.style.display = 'inline-block';
+      els.docStatusText.textContent = 'Processing & OCR...';
+    }
+    els.chatInput.placeholder = 'Processing ' + file.name + '...';
+
+    var formData = new FormData();
+    formData.append('file', file);
+
+    var headers = {};
+    if (state.token) {
+      headers['Authorization'] = 'Bearer ' + state.token;
+    }
+
+    fetch(API_BASE + '/documents/upload', {
+      method: 'POST',
+      headers: headers,
+      body: formData
+    })
+    .then(function(res) {
+      return res.json().then(function(data) {
+        if (!res.ok) throw data;
+        return data;
+      });
+    })
+    .then(function(data) {
+      state.documentProcessing = false;
+      if (data.status === 'processed') {
+        if (!isAppend) {
+          state.activeDocuments = [data];
+          state.activeDocumentIds = [data.document_id];
+        } else {
+          state.activeDocuments.push(data);
+          state.activeDocumentIds.push(data.document_id);
+        }
+        var docNames = state.activeDocuments.map(function(d) { return d.filename; }).join(', ');
+        els.docPreviewName.textContent = docNames;
+        var totalPages = state.activeDocuments.reduce(function(acc, d) { return acc + (d.page_count || 0); }, 0);
+        var totalChunks = state.activeDocuments.reduce(function(acc, d) { return acc + (d.chunk_count || 0); }, 0);
+        var unitLabel = data.format === 'pptx' ? 'slide' : (data.format === 'xlsx' ? 'sheet/section' : 'page');
+        els.docPageCount.textContent = totalPages + ' ' + unitLabel + (totalPages === 1 ? '' : 's');
+        els.docStatusBadge.className = 'doc-status-badge processed';
+        if (els.docSpinner) els.docSpinner.style.display = 'none';
+        var ocrTag = data.ocr_applied ? ' [OCR Extracted]' : '';
+        els.docStatusText.textContent = '✓ Document processed' + ocrTag + ' (' + totalChunks + ' chunks indexed)';
+        els.chatInput.placeholder = 'Ask about ' + file.name + '...';
+        loadAuditLog();
+      } else if (data.status === 'ocr_required') {
+        if (!isAppend) {
+          state.activeDocuments = [data];
+          state.activeDocumentIds = [data.document_id];
+        } else {
+          state.activeDocuments.push(data);
+          state.activeDocumentIds.push(data.document_id);
+        }
+        els.docPageCount.textContent = data.page_count + ' pages';
+        els.docStatusBadge.className = 'doc-status-badge ocr';
+        if (els.docSpinner) els.docSpinner.style.display = 'none';
+        els.docStatusText.textContent = '⚠ ' + (data.message || 'Scanned document. OCR was unable to detect readable text.');
+        els.chatInput.placeholder = 'Ask about ' + file.name + ' (scanned)...';
+      } else {
+        els.docStatusBadge.className = 'doc-status-badge failed';
+        if (els.docSpinner) els.docSpinner.style.display = 'none';
+        els.docStatusText.textContent = '✕ ' + (data.message || 'Unable to read this document.');
+      }
+      state.appendDocMode = false;
+      updateSendState();
+    })
+    .catch(function(err) {
+      state.documentProcessing = false;
+      state.appendDocMode = false;
+      var errMsg = (err && (err.detail || err.message)) || 'Unable to read this document.';
+      if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
+      els.docStatusBadge.className = 'doc-status-badge failed';
+      if (els.docSpinner) els.docSpinner.style.display = 'none';
+      els.docStatusText.textContent = '✕ ' + errMsg;
+      updateSendState();
+    });
+  }
+
+  function removeDocument() {
+    var docIds = state.activeDocumentIds.slice();
+    state.activeDocuments = [];
+    state.activeDocumentIds = [];
+    state.documentProcessing = false;
+    state.appendDocMode = false;
+    if (els.documentPreview) els.documentPreview.hidden = true;
+    if (els.imageAttach) els.imageAttach.value = '';
+    els.chatInput.placeholder = 'Ask Sovereign Workbench about equipment, logs, telemetry, or attached documents...';
+    updateSendState();
+
+    docIds.forEach(function(did) {
+      fetch(API_BASE + '/documents/' + did, {
+        method: 'DELETE',
+        headers: state.token ? { 'Authorization': 'Bearer ' + state.token } : {}
+      }).catch(function() {});
+    });
   }
 
   function removeImage() {
@@ -1129,8 +1565,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function updateSendState() {
     var hasText = els.chatInput.value.trim().length > 0;
-    els.btnSend.disabled = !hasText || state.pipelineRunning;
+    els.btnSend.disabled = !hasText || state.pipelineRunning || state.documentProcessing;
   }
+
 
 
   // ── AUTO-RESIZE TEXTAREA ──────────────────────────────────
@@ -1168,29 +1605,236 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  function renderAuditLog() {
+  function renderAuditLog(tamperInfo) {
+    if (!els.auditEntries) return;
+
     if (state.auditLog.length === 0) {
-      els.auditEntries.innerHTML = '<div class="audit-empty">No audit entries yet. Execute a query to generate log entries.</div>';
+      els.auditEntries.innerHTML = '<div class="audit-empty">No audit entries yet. Execute a query in Chat to generate log entries.</div>';
+      if (els.auditChainVisualTrack) {
+        els.auditChainVisualTrack.innerHTML =
+          '<div class="chain-block-card is-genesis">' +
+            '<div class="chain-card-top"><span class="chain-card-idx">H<sub>0</sub>: GENESIS</span><span class="chain-card-status-dot"></span></div>' +
+            '<div class="chain-card-event">Root Anchor</div>' +
+            '<div class="chain-card-hash">00000000&hellip;</div>' +
+          '</div>';
+      }
       return;
     }
-    var html = '';
+
+    var brokenIdx = (tamperInfo && tamperInfo.brokenAtIndex !== undefined && tamperInfo.brokenAtIndex !== null)
+      ? Number(tamperInfo.brokenAtIndex)
+      : null;
+
+    // ── 1. Render Chain Flow Visualizer ──
+    if (els.auditChainVisualTrack) {
+      var chainHtml = '';
+      // Genesis
+      chainHtml +=
+        '<div class="chain-block-card is-genesis" title="Genesis block anchor: H0 = 64 zero characters">' +
+          '<div class="chain-card-top">' +
+            '<span class="chain-card-idx">H<sub>0</sub>: GENESIS</span>' +
+            '<span class="chain-card-status-dot"></span>' +
+          '</div>' +
+          '<div class="chain-card-event">Root Anchor</div>' +
+          '<div class="chain-card-hash">00000000&hellip;</div>' +
+        '</div>';
+
+      var total = state.auditLog.length;
+      var blocksToShow = state.auditLog;
+      var isTruncated = false;
+      if (total > 14) {
+        blocksToShow = state.auditLog.slice(0, 3).concat(state.auditLog.slice(-7));
+        isTruncated = true;
+      }
+
+      for (var b = 0; b < blocksToShow.length; b++) {
+        var blk = blocksToShow[b];
+        var isBroken = brokenIdx !== null && blk.index >= brokenIdx;
+
+        if (isTruncated && b === 3) {
+          chainHtml +=
+            '<div class="chain-connector-arrow">' +
+              '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="2" y1="8" x2="14" y2="8"/><polyline points="9 3 14 8 9 13"/></svg>' +
+            '</div>' +
+            '<div class="chain-block-card" style="opacity:0.6; min-width:80px; text-align:center;">' +
+              '<span style="font-family:var(--font-mono);font-size:10px;">&hellip; ' + (total - 10) + ' blocks &hellip;</span>' +
+            '</div>';
+        }
+
+        chainHtml +=
+          '<div class="chain-connector-arrow">' +
+            '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="2" y1="8" x2="14" y2="8"/><polyline points="9 3 14 8 9 13"/></svg>' +
+          '</div>';
+
+        chainHtml +=
+          '<div class="chain-block-card ' + (isBroken ? 'is-broken' : '') + '" data-target-block="' + blk.index + '" title="Click to inspect block #' + blk.index + '">' +
+            '<div class="chain-card-top">' +
+              '<span class="chain-card-idx">BLOCK #' + String(blk.index).padStart(3, '0') + '</span>' +
+              '<span class="chain-card-status-dot"></span>' +
+            '</div>' +
+            '<div class="chain-card-event">' + esc(blk.event) + '</div>' +
+            '<div class="chain-card-hash">' + blk.hash.substring(0, 8) + '&hellip;</div>' +
+          '</div>';
+      }
+
+      // Head node
+      var headNode = state.auditLog[state.auditLog.length - 1];
+      chainHtml +=
+        '<div class="chain-connector-arrow">' +
+          '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="2" y1="8" x2="14" y2="8"/><polyline points="9 3 14 8 9 13"/></svg>' +
+        '</div>' +
+        '<div class="chain-block-card is-head" title="Current chain head">' +
+          '<div class="chain-card-top">' +
+            '<span class="chain-card-idx">HEAD: #' + headNode.index + '</span>' +
+            '<span class="chain-card-status-dot"></span>' +
+          '</div>' +
+          '<div class="chain-card-event">Chain Head</div>' +
+          '<div class="chain-card-hash">' + headNode.hash.substring(0, 8) + '&hellip;</div>' +
+        '</div>';
+
+      els.auditChainVisualTrack.innerHTML = chainHtml;
+
+      // Click on chain card to scroll down to ledger card
+      var chainCards = els.auditChainVisualTrack.querySelectorAll('[data-target-block]');
+      for (var c = 0; c < chainCards.length; c++) {
+        chainCards[c].addEventListener('click', function(ev) {
+          var tIdx = this.getAttribute('data-target-block');
+          var cardEl = document.getElementById('audit-block-' + tIdx);
+          if (cardEl) {
+            cardEl.classList.add('is-expanded');
+            cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+      }
+    }
+
+    // ── 2. Render Ledger Entries ──
+    var entriesHtml = '';
+    // Display newest first for audit console convenience
     for (var i = state.auditLog.length - 1; i >= 0; i--) {
       var e = state.auditLog[i];
-      html += '<div class="audit-entry">' +
-        '<div class="audit-entry-idx">#' + String(e.index).padStart(4,'0') + '</div>' +
-        '<div class="audit-entry-body">' +
-          '<div class="audit-entry-event">' + esc(e.event) + '</div>' +
-          '<div class="audit-entry-detail">' + esc(e.detail) + '</div>' +
-          '<div class="audit-entry-detail" style="margin-top:2px;opacity:0.7">' + e.timestamp + '</div>' +
-        '</div>' +
-        '<div class="audit-entry-hashes">' +
-          '<span class="hash-label">hash </span>' + e.hash.substring(0,16) + '\u2026<br>' +
-          '<span class="hash-label">prev </span>' + e.prevHash.substring(0,16) + '\u2026' +
-        '</div>' +
-      '</div>';
+      var isCompromised = brokenIdx !== null && e.index >= brokenIdx;
+
+      var canonicalPayloadObj = {
+        actor_user_id: e.actor_user_id || null,
+        detail: e.detail,
+        event_type: e.event,
+        index: e.index,
+        timestamp: e.timestamp
+      };
+      var canonicalPayloadStr = JSON.stringify(canonicalPayloadObj, Object.keys(canonicalPayloadObj).sort(), 2);
+
+      entriesHtml +=
+        '<div class="audit-entry-card ' + (isCompromised ? 'is-compromised' : '') + '" id="audit-block-' + e.index + '">' +
+          '<div class="entry-card-header" data-toggle-block="' + e.index + '">' +
+            '<div class="entry-card-left">' +
+              '<span class="entry-block-badge">BLOCK #' + String(e.index).padStart(4, '0') + '</span>' +
+              '<span class="entry-event-badge">' + esc(e.event) + '</span>' +
+              '<span class="entry-timestamp">' + esc(e.timestamp) + '</span>' +
+            '</div>' +
+            '<div class="entry-card-right">' +
+              '<span class="entry-status-badge ' + (isCompromised ? 'status-compromised' : 'status-verified') + '">' +
+                (isCompromised ? '✕ COMPROMISED' : '✓ VERIFIED') +
+              '</span>' +
+              '<svg class="entry-chevron" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 6 8 10 12 6"/></svg>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="entry-detail-text">' + esc(e.detail) + '</div>' +
+
+          '<div class="entry-hash-row">' +
+            '<div class="entry-hash-box">' +
+              '<span class="entry-hash-label">PREV:</span>' +
+              '<span class="entry-hash-val">' + e.prevHash.substring(0, 8) + '&hellip;' + e.prevHash.substring(56) + '</span>' +
+              '<button type="button" class="btn-copy-hash" data-copy-hash="' + e.prevHash + '" title="Copy previous hash">' +
+                '<svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M10 4V2.5A1.5 1.5 0 0 0 8.5 1h-6A1.5 1.5 0 0 0 1 2.5v6A1.5 1.5 0 0 0 2.5 10H4"/></svg>' +
+              '</button>' +
+            '</div>' +
+            '<span class="entry-hash-arrow">&rarr;</span>' +
+            '<div class="entry-hash-box">' +
+              '<span class="entry-hash-label">CURR:</span>' +
+              '<span class="entry-hash-val">' + e.hash.substring(0, 8) + '&hellip;' + e.hash.substring(56) + '</span>' +
+              '<button type="button" class="btn-copy-hash" data-copy-hash="' + e.hash + '" title="Copy current hash">' +
+                '<svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M10 4V2.5A1.5 1.5 0 0 0 8.5 1h-6A1.5 1.5 0 0 0 1 2.5v6A1.5 1.5 0 0 0 2.5 10H4"/></svg>' +
+              '</button>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="audit-entry-tray">' +
+            '<div class="tray-crypto-grid">' +
+              '<div class="tray-crypto-item">' +
+                '<div class="tray-crypto-label">Previous Hash (H<sub>' + (e.index > 0 ? e.index - 1 : 0) + '</sub>)</div>' +
+                '<div class="tray-crypto-val">' +
+                  '<span>' + e.prevHash + '</span>' +
+                  '<button type="button" class="btn-copy-hash" data-copy-hash="' + e.prevHash + '" title="Copy full previous hash"><svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M10 4V2.5A1.5 1.5 0 0 0 8.5 1h-6A1.5 1.5 0 0 0 1 2.5v6A1.5 1.5 0 0 0 2.5 10H4"/></svg></button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="tray-crypto-item">' +
+                '<div class="tray-crypto-label">Current Hash (H<sub>' + e.index + '</sub>)</div>' +
+                '<div class="tray-crypto-val">' +
+                  '<span>' + e.hash + '</span>' +
+                  '<button type="button" class="btn-copy-hash" data-copy-hash="' + e.hash + '" title="Copy full current hash"><svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M10 4V2.5A1.5 1.5 0 0 0 8.5 1h-6A1.5 1.5 0 0 0 1 2.5v6A1.5 1.5 0 0 0 2.5 10H4"/></svg></button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="tray-crypto-item">' +
+                '<div class="tray-crypto-label">Digest Algorithm</div>' +
+                '<div class="tray-crypto-val">SHA-256 (NIST FIPS 180-4 Compact Canonical JSON)</div>' +
+              '</div>' +
+              '<div class="tray-crypto-item">' +
+                '<div class="tray-crypto-label">Actor Identity</div>' +
+                '<div class="tray-crypto-val">' + (e.actor_user_id ? e.actor_user_id : 'System / Automated Operator Console') + '</div>' +
+              '</div>' +
+            '</div>' +
+
+            '<div class="tray-payload-box">' +
+              '<div class="tray-payload-header">' +
+                '<span class="tray-payload-label">Canonical JSON Payload (Hashed Data)</span>' +
+                '<button type="button" class="btn-copy-chip-hash" data-copy-payload="' + e.index + '">' +
+                  '<svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M10 4V2.5A1.5 1.5 0 0 0 8.5 1h-6A1.5 1.5 0 0 0 1 2.5v6A1.5 1.5 0 0 0 2.5 10H4"/></svg>' +
+                  '<span>Copy Payload JSON</span>' +
+                '</button>' +
+              '</div>' +
+              '<pre class="tray-payload-code" id="payload-code-' + e.index + '"><code>' + esc(canonicalPayloadStr) + '</code></pre>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
     }
-    els.auditEntries.innerHTML = html;
+
+    els.auditEntries.innerHTML = entriesHtml;
+
+    // Expand/collapse toggle
+    var cardHeaders = els.auditEntries.querySelectorAll('[data-toggle-block]');
+    for (var h = 0; h < cardHeaders.length; h++) {
+      cardHeaders[h].addEventListener('click', function(ev) {
+        var card = this.closest('.audit-entry-card');
+        if (card) card.classList.toggle('is-expanded');
+      });
+    }
+
+    // Copy hash buttons
+    var copyBtns = els.auditEntries.querySelectorAll('[data-copy-hash]');
+    for (var k = 0; k < copyBtns.length; k++) {
+      copyBtns[k].addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var hText = this.getAttribute('data-copy-hash');
+        copyHashToClipboard(hText, this);
+      });
+    }
+
+    // Copy payload buttons
+    var copyPayloadBtns = els.auditEntries.querySelectorAll('[data-copy-payload]');
+    for (var p = 0; p < copyPayloadBtns.length; p++) {
+      copyPayloadBtns[p].addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var idx = this.getAttribute('data-copy-payload');
+        var codeEl = document.getElementById('payload-code-' + idx);
+        if (codeEl) {
+          copyHashToClipboard(codeEl.textContent, this);
+        }
+      });
+    }
   }
+
 
 
   // ── PIPELINE (full view) ──────────────────────────────────
@@ -1387,8 +2031,12 @@ document.addEventListener('DOMContentLoaded', function () {
       headers['X-Model-Base-Url'] = storedBaseUrl;
     }
 
+    var chat = getActiveChat();
     var requestBody = {
       text: query,
+      message: query,
+      conversation_id: chat ? chat.id : null,
+      document_ids: (state.activeDocumentIds && state.activeDocumentIds.length > 0) ? state.activeDocumentIds : [],
       has_image: hasImage,
       image_data: imageData
     };
@@ -2191,12 +2839,14 @@ document.addEventListener('DOMContentLoaded', function () {
             var item = esc(line.replace(/^[-*]\s+/, ''));
             item = item.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
             item = item.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            item = item.replace(/\(Page\s+(\d+)\)/gi, '<span class="citation-tag">(Page $1)</span>');
             listHtml += '<li class="md-li">' + item + '</li>';
             inList = true;
           } else if (line) {
             var pLine = esc(line);
             pLine = pLine.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
             pLine = pLine.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            pLine = pLine.replace(/\(Page\s+(\d+)\)/gi, '<span class="citation-tag">(Page $1)</span>');
             if (inList) {
               listHtml += '</ul><p class="md-p">' + pLine + '</p><ul class="md-ul">';
             } else {
@@ -2213,7 +2863,9 @@ document.addEventListener('DOMContentLoaded', function () {
       var pText = esc(sec);
       pText = pText.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       pText = pText.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+      pText = pText.replace(/\(Page\s+(\d+)\)/gi, '<span class="citation-tag">(Page $1)</span>');
       result += '<p class="md-p">' + pText + '</p>';
+
     });
 
     return result;
@@ -2296,6 +2948,15 @@ document.addEventListener('DOMContentLoaded', function () {
         '"' + esc(topChunk.content.substring(0, 180)) + '\u2026"</p>');
     }
 
+    // Document Grounding Chunks (User-Uploaded PDFs via Qdrant)
+    if (responseData && responseData.document_chunks && responseData.document_chunks.length > 0) {
+      var topDocChunk = responseData.document_chunks[0];
+      blocksHtml += respBlock('Document Grounding (Qdrant Vector Store)',
+        '<p>Retrieved from: <strong>' + esc(topDocChunk.filename) + ' &middot; Page ' + topDocChunk.page_number + '</strong></p>' +
+        '<p style="margin-top:4px;font-family:var(--font-mono);font-size:11px;color:var(--text-2)">' +
+        '"' + esc(topDocChunk.text.substring(0, 180)) + '\u2026"</p>');
+    }
+
     // Vision Analysis (ONLY when an image was analyzed)
     var vis = (responseData && responseData.vision_analysis);
     if (vis) {
@@ -2343,6 +3004,30 @@ document.addEventListener('DOMContentLoaded', function () {
 
     blocksHtml += '</div>';
 
+    // Build Sources Block
+    var sourcesList = (responseData && responseData.sources) || [];
+    if (sourcesList.length === 0 && responseData && responseData.citations && responseData.citations.length > 0) {
+      var seenSrc = {};
+      responseData.citations.forEach(function(c) {
+        var s = c.filename + ' — Page ' + c.page;
+        if (!seenSrc[s]) { seenSrc[s] = true; sourcesList.push(s); }
+      });
+    }
+
+    var sourcesHtml = '';
+    if (sourcesList.length > 0) {
+      sourcesHtml = '<div class="msg-sources-section">' +
+        '<div class="msg-sources-header">' +
+          '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 3h10a1 1 0 0 1 1 1v10H2V3z"/><path d="M5 1h9a1 1 0 0 1 1 1v10"/></svg>' +
+          '<span>Sources &middot; Document Grounding</span>' +
+        '</div>' +
+        '<div class="msg-sources-list">';
+      sourcesList.forEach(function(src) {
+        sourcesHtml += '<span class="msg-source-pill"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h6l2 2v6H2V2z"/></svg>' + esc(src) + '</span>';
+      });
+      sourcesHtml += '</div></div>';
+    }
+
     var fullHtml = '';
     if (parsed.code) {
       if (parsed.intro) {
@@ -2354,6 +3039,9 @@ document.addEventListener('DOMContentLoaded', function () {
       }
       if (parsed.outro) {
         fullHtml += '<p style="margin-top:10px;color:var(--text-2);">' + esc(parsed.outro) + '</p>';
+      }
+      if (sourcesHtml) {
+        fullHtml += sourcesHtml;
       }
 
       fullHtml += '<div class="workbench-verification-wrap">' +
@@ -2374,6 +3062,9 @@ document.addEventListener('DOMContentLoaded', function () {
       fullHtml += renderActionToolbar();
     } else {
       fullHtml += '<div class="msg-markdown-body">' + renderSimpleMarkdown(responseText) + '</div>';
+      if (sourcesHtml) {
+        fullHtml += sourcesHtml;
+      }
 
       fullHtml += '<div class="workbench-verification-wrap">' +
         '<details class="workbench-verification-details">' +
@@ -2398,6 +3089,7 @@ document.addEventListener('DOMContentLoaded', function () {
     renderChatMessages();
     scrollToBottom();
   }
+
 
   function replaceThinkingWithBlocked(title, details, auditEntry, startTime, assistantMsg) {
     var chat = getActiveChat();
@@ -2639,6 +3331,17 @@ document.addEventListener('DOMContentLoaded', function () {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); els.imageAttach.click(); }
   });
   els.btnRemoveImg.addEventListener('click', removeImage);
+  if (els.btnRemoveDoc) els.btnRemoveDoc.addEventListener('click', removeDocument);
+
+  if (els.btnReplaceDoc) els.btnReplaceDoc.addEventListener('click', function() {
+    state.appendDocMode = false;
+    els.imageAttach.click();
+  });
+  if (els.btnAddDoc) els.btnAddDoc.addEventListener('click', function() {
+    state.appendDocMode = true;
+    els.imageAttach.click();
+  });
+
 
   var btnCoding = document.getElementById('btn-demo-coding');
   if (btnCoding) {
@@ -2857,10 +3560,26 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  // Tools JSON Export
+  // Audit Console Actions
+  if (els.btnVerifyAudit) {
+    els.btnVerifyAudit.addEventListener('click', verifyAuditIntegrity);
+  }
+  if (els.btnExportAudit) {
+    els.btnExportAudit.addEventListener('click', exportAuditJson);
+  }
+  if (els.btnCheckpointAudit) {
+    els.btnCheckpointAudit.addEventListener('click', createOnDemandCheckpoint);
+  }
+  if (els.btnCopyHeadHash) {
+    els.btnCopyHeadHash.addEventListener('click', function() {
+      var h = this.getAttribute('data-full-hash') || state.lastHash;
+      if (h) copyHashToClipboard(h, this);
+    });
+  }
   if (els.btnExportAuditJson) {
     els.btnExportAuditJson.addEventListener('click', exportAuditJson);
   }
+
 
 
   // ── INIT ───────────────────────────────────────────────────

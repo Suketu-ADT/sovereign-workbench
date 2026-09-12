@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     SOVEREIGN_MODE: bool = False
     LOCAL_MODEL_BASE_URL: str = "http://localhost:8000/v1"
 
+    # ── Tamper-Evident Audit Ledger & Ed25519 Signed Checkpoints ──
+    AUDIT_SIGNING_PRIVATE_KEY_PATH: str | None = None
+    AUDIT_SIGNING_PUBLIC_KEY: str | None = None
+    AUDIT_SIGNING_KEY_ID: str = "audit-key-01"
+    AUDIT_CHECKPOINT_INTERVAL: int = 100
+
+
 
 settings = Settings()
 
